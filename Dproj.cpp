@@ -183,10 +183,10 @@ int main(int argc, char **argv){
   cout << " *Loading velocity grid "; //Verbose: loading vel. grid
 #endif
 
-  if((LoadVLatLonGrid(DprojParams.DepositionDate))!=0){//Load velocity grid
-      cout<<"[Fail]"<<endl;
-      return 1;
-  }
+if((LoadVLatLonGrid(DprojParams.DepositionDate))!=0){//Load velocity grid
+  cout<<"[Fail]"<<endl;
+  return 1;
+ }
 
 #ifdef DEBUG
   cout<<"[OK]" << endl;//Success loading vel. grid
@@ -227,9 +227,12 @@ int main(int argc, char **argv){
   vector<int> Flagfdepth(numtracers,0);
 
   vector<vectorXYZ> Vtracer;
+  vector<vectorXYZ> UnitNormalVector;
   Vtracer.reserve(numtracers);
+  UnitNormalVector.reserve(numtracers);
   for(unsigned int q=0; q<numtracers; q++){
     Vtracer.push_back(vectorXYZ(0,0,0));
+    UnitNormalVector.push_back(vectorXYZ(0,0,0));
   }
   
   vector<double> Projection(numtracers,0);
@@ -246,128 +249,90 @@ int main(int argc, char **argv){
 
   double t;
   
-  omp_set_num_threads(20);
+omp_set_num_threads(20);
 #pragma omp parallel for default(shared) private(t)// Parallelizing the code for computing trajectories
   for (unsigned int q=0; q<numtracers; q++) {
     for(t=tstart; ascnd==1?(t<tend):(t>=tend); t+=DprojParams.TimeStep) {
     
-    //COMPUTE NEW POSITION
-    tracer1[q]=tracer2[q];// it stores previous position in tracer1[q]
-    sattracer1[4*q]=sattracer2[4*q];// it stores previous position in sattracer1[q]
-    sattracer1[4*q+1]=sattracer2[4*q+1];// it stores previous position in sattracer1[q]
-    sattracer1[4*q+2]=sattracer2[4*q+2];// it stores previous position in sattracer1[q]
-    sattracer1[4*q+3]=sattracer2[4*q+3];// it stores previous position in sattracer1[q]
+      //COMPUTE NEW POSITION
+      tracer1[q]=tracer2[q];// it stores previous position in tracer1[q]
+      sattracer1[4*q]=sattracer2[4*q];// it stores previous position in sattracer1[q]
+      sattracer1[4*q+1]=sattracer2[4*q+1];// it stores previous position in sattracer1[q]
+      sattracer1[4*q+2]=sattracer2[4*q+2];// it stores previous position in sattracer1[q]
+      sattracer1[4*q+3]=sattracer2[4*q+3];// it stores previous position in sattracer1[q]
  
-    if(RK4(t, DprojParams.TimeStep, &tracer2[q], GetVflowplusVsink)==1 ||
-       RK4(t, DprojParams.TimeStep, &sattracer2[4*q], GetVflowplusVsink)==1 ||
-       RK4(t, DprojParams.TimeStep, &sattracer2[4*q+1], GetVflowplusVsink)==1 ||
-       RK4(t, DprojParams.TimeStep, &sattracer2[4*q+2], GetVflowplusVsink)==1 ||
-       RK4(t, DprojParams.TimeStep, &sattracer2[4*q+3], GetVflowplusVsink)==1){
-      ftime[q]=double(t-tstart);
-      FlagRK4[q]=1;
-      break;
-    }          
-    ftime[q]=t+DprojParams.TimeStep;
+      if(RK4(t, DprojParams.TimeStep, &tracer2[q], GetVflowplusVsink)==1 ||
+	 RK4(t, DprojParams.TimeStep, &sattracer2[4*q], GetVflowplusVsink)==1 ||
+	 RK4(t, DprojParams.TimeStep, &sattracer2[4*q+1], GetVflowplusVsink)==1 ||
+	 RK4(t, DprojParams.TimeStep, &sattracer2[4*q+2], GetVflowplusVsink)==1 ||
+	 RK4(t, DprojParams.TimeStep, &sattracer2[4*q+3], GetVflowplusVsink)==1){
+	ftime[q]=t;
+	FlagRK4[q]=1;
+	break;
+      }          
+      ftime[q]=t+DprojParams.TimeStep;
 
-    double f=(fdepth-tracer1[q].z);
-    double fmid=(fdepth-tracer2[q].z);
-    double discriminant=f*fmid;   
+      double f=(fdepth-tracer1[q].z);
+      double fmid=(fdepth-tracer2[q].z);
+      double discriminant=f*fmid;   
 
-    if(discriminant<=0.0) {	
-      double rtb,dt;
-      rtb=0.0;
-      dt=DprojParams.TimeStep;
-      double tmid;
-      for (int j=0;j<20;j++) {
-	if(Flagfdepth[q]==1) break;
-	tracer2[q]=tracer1[q];
-	sattracer2[4*q]=sattracer1[4*q];
-	sattracer2[4*q+1]=sattracer1[4*q+1];
-	sattracer2[4*q+2]=sattracer1[4*q+2];
-	sattracer2[4*q+3]=sattracer1[4*q+3];
-	if(RK4(t, tmid=rtb+(dt*=0.5), &tracer2[q], GetVflowplusVsink)==1 ||
-	   RK4(t, tmid=rtb+(dt*=0.5), &sattracer2[4*q], GetVflowplusVsink)==1 ||
-	   RK4(t, tmid=rtb+(dt*=0.5), &sattracer2[4*q+1], GetVflowplusVsink)==1 ||
-	   RK4(t, tmid=rtb+(dt*=0.5), &sattracer2[4*q+2], GetVflowplusVsink)==1 ||
-	   RK4(t, tmid=rtb+(dt*=0.5), &sattracer2[4*q+3], GetVflowplusVsink)==1){
-	  FlagRK4[q]=1;
-	  break;
-	}
-	fmid=(fdepth-tracer2[q].z);
-	if (fmid <= 0.0) rtb=tmid;
-	if (fabs(dt) < 0.04 || fmid == 0.0){
-	  ftime[q]=t+tmid;
-	  Flagfdepth[q]=1;
-	  // Computing variables IF THE PARTILCE REACH THE DEPTH
-	  if(GetVflowplusVsink(ftime[q],tracer2[q],&Vtracer[q])==1){
+      if(discriminant<=0.0) {	
+	double rtb,dt;
+	rtb=0.0;
+	dt=DprojParams.TimeStep;
+	double tmid;
+	for (int j=0;j<20;j++) {
+	  
+	  if(Flagfdepth[q]==1) break;
+	  tracer2[q]=tracer1[q];
+	  sattracer2[4*q]=sattracer1[4*q];
+	  sattracer2[4*q+1]=sattracer1[4*q+1];
+	  sattracer2[4*q+2]=sattracer1[4*q+2];
+	  sattracer2[4*q+3]=sattracer1[4*q+3];
+	  tmid=rtb+(dt*=0.5);
+	  if(RK4(t, tmid, &tracer2[q], GetVflowplusVsink)==1 ||
+	     RK4(t, tmid, &sattracer2[4*q], GetVflowplusVsink)==1 ||
+	     RK4(t, tmid, &sattracer2[4*q+1], GetVflowplusVsink)==1 ||
+	     RK4(t, tmid, &sattracer2[4*q+2], GetVflowplusVsink)==1 ||
+	     RK4(t, tmid, &sattracer2[4*q+3], GetVflowplusVsink)==1){
 	    FlagRK4[q]=1;
 	    break;
 	  }
-	  Vtracer[q].z-=DprojParams.Vsink;
+	  fmid=(fdepth-tracer2[q].z);
+	  if (fmid <= 0.0) rtb=tmid;
+	  if (dt < (DprojParams.TimeStep/16.0) || fmid == 0.0){
+	    ftime[q]=t+tmid;
+	    Flagfdepth[q]=1;
+	    // Computing variables IF THE PARTILCE REACH THE DEPTH
+	    if(GetVflowplusVsink(ftime[q],tracer2[q],&Vtracer[q])==1){
+	      FlagRK4[q]=1;
+	      break;
+	    }
       
-	  //COMPUTE ALL THE STUFFFFFSSSSS
+	    //COMPUTE ALL THE STUFFFFFSSSSS
 
-	  vectorXYZ TangentX;
-	  TangentX.x=rearth*cos(rads*tracer2[q].y)*((sattracer2[4*q].x-sattracer2[4*q+2].x)*(rads/2.0)); 
-	  TangentX.y=rearth*((sattracer2[4*q].y-sattracer2[4*q+2].y)*(rads/2.0)); 
-	  TangentX.z=(sattracer2[4*q].z-sattracer2[4*q+2].z)/2.0;
+	    vectorXYZ TangentX;
+	    TangentX.x=rearth*cos(rads*sattracer2[4*q].y)*((sattracer2[4*q].x-sattracer2[4*q+2].x)*(rads/2.0)); 
+	    TangentX.y=rearth*((sattracer2[4*q].y-sattracer2[4*q+2].y)*(rads/2.0)); 
+	    TangentX.z=(sattracer2[4*q].z-sattracer2[4*q+2].z)/2.0;
       
-	  vectorXYZ TangentY;        
-	  TangentY.x=rearth*cos(rads*tracer2[q].y)*((sattracer2[4*q+1].x-sattracer2[4*q+3].x)*(rads/2.0)); 
-	  TangentY.y=rearth*((sattracer2[4*q+1].y-sattracer2[4*q+3].y)*(rads/2.0)); 
-	  TangentY.z=(sattracer2[4*q+1].z-sattracer2[4*q+3].z)/2.0; 
+	    vectorXYZ TangentY;        
+	    TangentY.x=rearth*cos(rads*sattracer2[q+1].y)*((sattracer2[4*q+1].x-sattracer2[4*q+3].x)*(rads/2.0)); 
+	    TangentY.y=rearth*((sattracer2[4*q+1].y-sattracer2[4*q+3].y)*(rads/2.0)); 
+	    TangentY.z=(sattracer2[4*q+1].z-sattracer2[4*q+3].z)/2.0; 
 	  
-	  vectorXYZ NormalVector=cross(TangentX,TangentY);
-	  double NormNormalVector=sqrt(scalar(NormalVector,NormalVector));
-	  vectorXYZ UnitNormalVector=(1.0/NormNormalVector)*NormalVector;
+	    vectorXYZ NormalVector=cross(TangentX,TangentY);
+	    double NormNormalVector=sqrt(scalar(NormalVector,NormalVector));
+	    UnitNormalVector[q]=(1.0/NormNormalVector)*NormalVector;
 	  
-	  Projection[q]=1.0/fabs(scalar(UnitNormalVector,Vtracer[q])/Vtracer[q].z);
-	  Stretching[q]=NormNormalVector/(DprojParams.DistSat*DprojParams.DistSat);
-	  FactorDensity[q]=Stretching[q]*Projection[q];
-	  break;
+	    Projection[q]=fabs(Vtracer[q].z/scalar(UnitNormalVector[q],Vtracer[q]));
+	    Stretching[q]=NormNormalVector/(DprojParams.DistSat*DprojParams.DistSat);
+	    FactorDensity[q]=Stretching[q]*Projection[q];
+	    break;
+	  }
 	}
-      }
-      break;
-    }
-    /* BACKUP!!!!    
-    if(tracer2[q].z<=fdepth){
-      if((tracer1[q].z-fdepth)<(fdepth-tracer2[q].z)){
-	tracer2[q]=tracer1[q];
-	sattracer2[4*q]=sattracer1[4*q];
-	sattracer2[4*q+1]=sattracer1[4*q+1];
-	sattracer2[4*q+2]=sattracer1[4*q+2];
-	sattracer2[4*q+3]=sattracer1[4*q+3];
-	ftime[q]-=DprojParams.TimeStep;
-      }
-      Flagfdepth[q]=1;
-      // Computing variables IF THE PARTILCE REACH THE DEPTH
-      if(GetVflowplusVsink(ftime[q],tracer2[q],&Vtracer[q])==1){
-	FlagRK4[q]=1;
 	break;
       }
-      Vtracer[q].z-=DprojParams.Vsink;
-      
-      //COMPUTE ALL THE STUFFFFFSSSSS
-
-      vectorXYZ TangentX;
-      TangentX.x=rearth*cos(rads*tracer2[q].y)*((sattracer2[4*q].x-sattracer2[4*q+2].x)*(rads/2.0)); 
-      TangentX.y=rearth*((sattracer2[4*q].y-sattracer2[4*q+2].y)*(rads/2.0)); 
-      TangentX.z=(sattracer2[4*q].z-sattracer2[4*q+2].z)/2.0;
-      
-      vectorXYZ TangentY;        
-      TangentY.x=rearth*cos(rads*tracer2[q].y)*((sattracer2[4*q+1].x-sattracer2[4*q+3].x)*(rads/2.0)); 
-      TangentY.y=rearth*((sattracer2[4*q+1].y-sattracer2[4*q+3].y)*(rads/2.0)); 
-      TangentY.z=(sattracer2[4*q+1].z-sattracer2[4*q+3].z)/2.0; 
-
-      vectorXYZ NormalVector=cross(TangentX,TangentY);
-      double NormNormalVector=sqrt(scalar(NormalVector,NormalVector));
-      vectorXYZ UnitNormalVector=(1.0/NormNormalVector)*NormalVector;
-
-      Projection[q]=1.0/fabs(scalar(UnitNormalVector,Vtracer[q])/Vtracer[q].z);
-      Stretching[q]=NormNormalVector/(DprojParams.DistSat*DprojParams.DistSat);
-      FactorDensity[q]=Stretching[q]*Projection[q];
-      break;
-      }*/
     }
   }
 
@@ -380,9 +345,35 @@ int main(int argc, char **argv){
    * WRITE RESULTS
    **********************************************/
 
-  // FINAL GRID
-  string VTKffilename="TEST_Dproj.vtk";  
-  ofstream offile(VTKffilename.c_str());
+  string rawfilename;;
+  size_t lastdot = SConfigurationFile.find_last_of(".");
+  if(lastdot == string::npos){
+    rawfilename=SConfigurationFile;
+  } else {
+    rawfilename=SConfigurationFile.substr(0,lastdot);
+  }
+
+  // DATA FILE
+
+  string datafilename=rawfilename+".dat";  
+  ofstream datafile(datafilename.c_str());
+  for(unsigned int q=0; q<tracer2.size(); q++){
+    datafile<<grid[q]<<" ";
+    datafile<<tracer2[q]<<" ";
+    datafile<<Flagfdepth[q]<<" ";
+    datafile<<FlagRK4[q]<<" ";
+    datafile<<ftime[q]<<" ";
+    datafile<<Vtracer[q]<<" ";
+    datafile<<UnitNormalVector[q]<<" ";
+    datafile<<(isnan(Projection[q])?-1.0:Projection[q])<<" ";
+    datafile<<(isnan(Stretching[q])?-1.0:Stretching[q])<<" ";
+    datafile<<(isnan(FactorDensity[q])?-1.0:FactorDensity[q])<<endl;
+  }
+  datafile.close();
+
+  // VTK FILE
+  string VTKfilename=rawfilename+".vtk";  
+  ofstream offile(VTKfilename.c_str());
   
   offile<<"# vtk DataFile Version 3.0"<<endl;
   offile<<"Final grid"<<endl; 
@@ -408,6 +399,28 @@ int main(int argc, char **argv){
   offile<<"LOOKUP_TABLE default"<<endl;
   for(unsigned int q=0; q<FlagRK4.size(); q++) {
       offile<<FlagRK4[q]<<endl;
+  }
+
+  offile<<"SCALARS EndTime float 1"<<endl;
+  offile<<"LOOKUP_TABLE default"<<endl;
+  for(unsigned int q=0; q<ftime.size(); q++) {
+      offile<<ftime[q]<<endl;
+  }
+
+  offile<<"SCALARS EndDepth float 1"<<endl;
+  offile<<"LOOKUP_TABLE default"<<endl;
+  for(unsigned int q=0; q<ftime.size(); q++) {
+      offile<<tracer2[q].z<<endl;
+  }
+
+  offile<<"VECTORS Velocity float"<<endl;
+  for(unsigned int q=0; q<Vtracer.size(); q++){
+    offile<<Vtracer[q]<<endl;
+  }
+
+  offile<<"VECTORS UnitNormal float"<<endl;
+  for(unsigned int q=0; q<UnitNormalVector.size(); q++){
+    offile<<UnitNormalVector[q]<<endl;
   }
 
   offile<<"SCALARS Projection float 1"<<endl;

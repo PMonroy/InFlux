@@ -59,5 +59,6 @@ clean:
 	$(RM) $(common_obj) $(InFlux_obj) $(InFluxNum_obj) $(Dproj_obj) *.d *~ *# InFlux InfluxNum Dproj
 
 .PHONY: install
-install: InFlux InFluxNum Dproj
-	install $< $(DESTDIR)
+exec = InFlux InFluxNum Dproj
+install: $(exec)
+	install $(exec) $(DESTDIR)

@@ -233,7 +233,8 @@ omp_set_num_threads(20);
       double f=(fdepth-tracer1[q].z);
       double fmid=(fdepth-tracer2[q].z);
       double discriminant=f*fmid;
-      double deltat=0.0;
+      double deltat;
+      deltat=0.0;
       
       if(fmid==0.0){
 	Flagfdepth[q]=1;
