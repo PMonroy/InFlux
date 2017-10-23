@@ -368,8 +368,18 @@ int main(int argc, char **argv){
   /**********************************************
    * WRITE RESULTS
    **********************************************/
+
+  string rawfilename;;
+  size_t lastdot = SConfigurationFile.find_last_of(".");
+  if(lastdot == string::npos){
+    rawfilename=SConfigurationFile;
+  } else {
+    rawfilename=SConfigurationFile.substr(0,lastdot);
+  }
+
+  
   // FINAL GRID
-  string VTKffilename="finalgrid.vtk";  
+  string VTKffilename=rawfilename+".vtk";  
   ofstream offile(VTKffilename.c_str());
   
   offile<<"# vtk DataFile Version 3.0"<<endl;

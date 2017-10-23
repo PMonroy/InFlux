@@ -95,7 +95,7 @@ int main(int argc, char **argv){
     }*/
   int TracerDimx, TracerDimy;
   if(MakeRegular2DGrid(InFluxNumParams.DomainBL,
-		       InFluxNumParams.InterSpacing*(1.0/30),
+		       InFluxNumParams.InterSpacing*(1.0/20),
 		       InFluxNumParams.DomainTR,
 		       KcompNormal,
 		       &itracer,
@@ -200,10 +200,10 @@ int main(int argc, char **argv){
 
   SetupLagrangianEngine(SConfigurationFile);
   
-  vector<vectorXYZ> tracer1,tracer2;
+  vector<vectorXYZ> buffertracer,ftracer;
 
-  tracer1=itracer;
-  tracer2=itracer;
+  buffertracer=itracer;
+  ftracer=itracer;
   unsigned int numtracers=itracer.size();
   double fdepth=(InFluxNumParams.TimeStep<0)?InFluxNumParams.DomainTR.z:InFluxNumParams.DomainBL.z;
   vector<int> Flagfdepth(numtracers,0);
@@ -214,60 +214,51 @@ int main(int argc, char **argv){
    * TRACER LOOP
    ****************************************************/
 
+  double t;
   
 omp_set_num_threads(20);
-#pragma omp parallel for default(shared) // Parallelizing the code for computing trajectories
+#pragma omp parallel for default(shared) private(t)// Parallelizing the code for computing trajectories
  
   for (unsigned int q=0; q<numtracers; q++) {
-    for(double t=tstart; ascnd==1?(t<tend):(t>=tend); t+=InFluxNumParams.TimeStep) {
-       if(FlagRK4[q]==1 || Flagfdepth[q]==1) continue;
+    for(t=tstart; ascnd==1?(t<tend):(t>=tend); t+=InFluxNumParams.TimeStep) {
       //COMPUTE NEW POSITION
-      tracer1[q]=tracer2[q];// it stores previous position in tracer1[q]
-      if(RK4(t, InFluxNumParams.TimeStep, &tracer2[q], GetVflowplusVsink)==1){
-	ftime[q]=double(t-tstart)+InFluxNumParams.TimeStep;
-	FlagRK4[q]=1;	
-	continue;
+      buffertracer[q]=ftracer[q];// it stores previous position in tracer1[q]
+      if(RK4(t, InFluxNumParams.TimeStep, &ftracer[q], GetVflowplusVsink)==1){
+	ftracer[q]=buffertracer[q];
+	ftime[q]=t;
+	FlagRK4[q]=1;
+	break;
       }
-
-      // Check is final depth is reached (computation of deltat & tracer2[q])      
-      double f=(fdepth-tracer1[q].z);
-      double fmid=(fdepth-tracer2[q].z);
-      double discriminant=f*fmid;
-      double deltat;
-      deltat=0.0;
       
-      if(fmid==0.0){
-	Flagfdepth[q]=1;
-	deltat=InFluxNumParams.TimeStep;
-      }else if(discriminant<0.0){	
-	double rtb,dt;
-	rtb=f<0.0?(dt=InFluxNumParams.TimeStep,0.0):(dt=-InFluxNumParams.TimeStep,InFluxNumParams.TimeStep);
+      // CHECK IF IT ARRIVE DEPTH 
+      double f=(fdepth-buffertracer[q].z);
+      double fmid=(fdepth-ftracer[q].z);
+      double discriminant=f*fmid;   
+      double dt;
+
+      dt=InFluxNumParams.TimeStep;      
+      if(discriminant<=0.0) {	
+	double rtb;
+	rtb=0.0;
 	double tmid;
-	for (int j=0;j<20;j++) {
-	  if(FlagRK4[q]==1 || Flagfdepth[q]==1) continue;
-	  tracer2[q]=tracer1[q];
-	  if(RK4(t, tmid=rtb+(dt*=0.5), &tracer2[q], GetVflowplusVsink)==1) {
+	for (int j=0;j<20;j++) {	  
+	  ftracer[q]=buffertracer[q];
+	  tmid=rtb+(dt*=0.5);
+	  if(RK4(t, tmid, &ftracer[q], GetVflowplusVsink)==1){
+	    ftracer[q]=buffertracer[q];
 	    FlagRK4[q]=1;
-	    continue;
+	    break;
 	  }
-	  fmid=(fdepth-tracer2[q].z);
+	  fmid=(fdepth-ftracer[q].z);
 	  if (fmid <= 0.0) rtb=tmid;
-	  if (fabs(dt) < 0.04 || fmid == 0.0){
+	  if (dt < (InFluxNumParams.TimeStep/16.0) || fmid == 0.0){
+	    dt=tmid;	    
 	    Flagfdepth[q]=1;
-	    continue;
+	    break;
 	  }
 	}
-	
-	if(FlagRK4[q]==1) continue;
-	else deltat=tmid;
-	
-      }else deltat=InFluxNumParams.TimeStep;
-   
-
-      // If final depht is reached, next element of the loop
-      if(Flagfdepth[q]==1){
-	ftime[q]=double(t-tstart)+deltat;	
-	continue;
+	ftime[q]=t+dt;
+	break;
       }
     }
   }
@@ -302,19 +293,19 @@ omp_set_num_threads(20);
   
   // max and min of lon and lat tracer final position
 
-  vectorXYZ tracermax=tracer2[0];
-  vectorXYZ tracermin=tracer2[0];
+  vectorXYZ tracermax=ftracer[0];
+  vectorXYZ tracermin=ftracer[0];
 
   for (unsigned int q=0; q<numtracers; q++) {
     if(FlagRK4[q]!=1 && Flagfdepth[q]!=0){
 
-      if(tracer2[q].x>tracermax.x) tracermax.x=tracer2[q].x;
-      if(tracer2[q].y>tracermax.y) tracermax.y=tracer2[q].y;
-      if(tracer2[q].z>tracermax.z) tracermax.z=tracer2[q].z;
+      if(ftracer[q].x>tracermax.x) tracermax.x=ftracer[q].x;
+      if(ftracer[q].y>tracermax.y) tracermax.y=ftracer[q].y;
+      if(ftracer[q].z>tracermax.z) tracermax.z=ftracer[q].z;
       
-      if(tracer2[q].x<tracermin.x) tracermin.x=tracer2[q].x;
-      if(tracer2[q].y<tracermin.y) tracermin.y=tracer2[q].y;
-      if(tracer2[q].z<tracermin.z) tracermin.z=tracer2[q].z;
+      if(ftracer[q].x<tracermin.x) tracermin.x=ftracer[q].x;
+      if(ftracer[q].y<tracermin.y) tracermin.y=ftracer[q].y;
+      if(ftracer[q].z<tracermin.z) tracermin.z=ftracer[q].z;
 
     }
     
@@ -348,10 +339,7 @@ omp_set_num_threads(20);
   int jini,jend;    
   int qini,qend;
   
-  for (unsigned int q=0; q<numtracers; q++){
-   
-
-    
+  for (unsigned int q=0; q<numtracers; q++){    
     // locate initial cell
     rini=(itracer[q]-InFluxNumParams.DomainBL)/InFluxNumParams.InterSpacing;
     iini=floor(rini.x);
@@ -362,7 +350,7 @@ omp_set_num_threads(20);
 
     
     // locate arrival cell
-    rend=(tracer2[q]-tracermin)/InFluxNumParams.InterSpacing;
+    rend=(ftracer[q]-tracermin)/InFluxNumParams.InterSpacing;
     iend=floor(rend.x);
     jend=floor(rend.y);
 
@@ -379,31 +367,20 @@ omp_set_num_threads(20);
     }
   }
 
-  cout << "hola" <<endl;
-  
   /**********************************************
    * WRITE RESULTS
    **********************************************/
-  // IGRID CLUSTERING
-  string VTKigridfile="igrid_cluster.vtk";  
-  ofstream igridfile(VTKigridfile.c_str());
-  igridfile<<"# vtk DataFile Version 3.0"<<endl;
-  igridfile<<"grid aggregation 2D"<<endl; 
-  igridfile<<"ASCII"<<endl;
-  igridfile<<"DATASET STRUCTURED_POINTS"<< endl;
-  igridfile<<"DIMENSIONS "<< igridDimx+1 <<" "<< igridDimy+1 <<" "<< 1 <<endl;
-  igridfile<<"ORIGIN "<<igrid[0].x<<" "<<igrid[0].y<<" "<< igrid[0].z <<endl;
-  igridfile<<"SPACING "<<InFluxNumParams.InterSpacing.x<<" "<<InFluxNumParams.InterSpacing.y<<" "<< InFluxNumParams.InterSpacing.z <<endl;
-  igridfile<<"CELL_DATA "<<(igridDimx)*(igridDimy)<<endl;
-  igridfile<<"SCALARS nini int"<<endl;
-  igridfile<<"LOOKUP_TABLE default"<<endl;
-  for(unsigned int q=0; q<nini.size(); q++) {
-      igridfile<<nini[q]<<endl;
+  string rawfilename;
+  size_t lastdot = SConfigurationFile.find_last_of(".");
+  if(lastdot == string::npos){
+    rawfilename=SConfigurationFile;
+  } else {
+    rawfilename=SConfigurationFile.substr(0,lastdot);
   }
-  igridfile.close();
-  cout << "hola1" <<endl;
+
+  
   // IGRID CLUSTERING
-  string VTKfgridfile="fgrid_cluster.vtk";  
+  string VTKfgridfile=rawfilename+".vtk";  
   ofstream fgridfile(VTKfgridfile.c_str());
   fgridfile<<"# vtk DataFile Version 3.0"<<endl;
   fgridfile<<"fgrid aggregation 2D"<<endl; 
@@ -419,7 +396,6 @@ omp_set_num_threads(20);
       fgridfile<<nend[q]<<endl;
   }
   fgridfile.close();
-cout << "hola2" <<endl;
   
   /*
   // STARTING POSITIONS
@@ -448,12 +424,12 @@ cout << "hola2" <<endl;
   endfile<<"Final grid"<<endl; 
   endfile<<"ASCII"<<endl;
   endfile<<"DATASET POLYDATA"<<endl;
-  endfile<<"POINTS "<<tracer2.size()<<" float"<<endl;
-  for(unsigned int q=0; q<tracer2.size(); q++){
-    endfile<<tracer2[q]<<endl;
+  endfile<<"POINTS "<<ftracer.size()<<" float"<<endl;
+  for(unsigned int q=0; q<ftracer.size(); q++){
+    endfile<<ftracer[q]<<endl;
   }
-  endfile<<"VERTICES "<<tracer2.size()<<" "<<tracer2.size()*2<<endl;
-  for(unsigned int q=0; q<tracer2.size(); q++){
+  endfile<<"VERTICES "<<ftracer.size()<<" "<<ftracer.size()*2<<endl;
+  for(unsigned int q=0; q<ftracer.size(); q++){
     endfile<<"1 "<<q<<endl;
   }
   endfile.close();*/
