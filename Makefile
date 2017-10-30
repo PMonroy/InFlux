@@ -6,7 +6,7 @@ RM=rm -rf
 
 DESTDIR=$(HOME)/bin
 
-common_src= Constants.cpp  EqDate.cpp  GridConstruction.cpp LagrangianEngine.cpp  ParseParameters.cpp  VectorXYZ.cpp  VFlow.cpp  VTKdump.cpp
+common_src= Constants.cpp  EqDate.cpp  GridConstruction.cpp LagrangianEngine.cpp  ParseParameters.cpp  VectorXYZ.cpp  VFlow.cpp  VTKdump.cpp mt19937ar.cpp
 common_obj=$(common_src:.cpp=.o) 
 common_dep=$(common_obj:.o=.d)  # one dependency file for each source
 
@@ -25,9 +25,14 @@ Dproj_src=Dproj.cpp
 Dproj_obj=$(Dproj_src:.cpp=.o) 
 Dproj_dep=$(Dproj_obj:.o=.d)  # one dependency file for each source
 
-.PHONY: all InFlux InFluxNum Dproj
+#Dproj
+chist_src=chist.cpp
+chist_obj=$(chist_src:.cpp=.o) 
+chist_dep=$(chist_obj:.o=.d)  # one dependency file for each source
 
-all: all InFlux InFluxNum Dproj
+.PHONY: all InFlux InFluxNum Dproj chist
+
+all: all InFlux InFluxNum Dproj chist
 
 
 InFlux: $(common_obj) $(InFlux_obj)
@@ -39,10 +44,14 @@ InFluxNum: $(common_obj) $(InFluxNum_obj)
 Dproj: $(common_obj) $(Dproj_obj)
 	$(CPP) -o $@ $^ $(LDFLAGS)
 
+chist: $(common_obj) $(chist_obj)
+	$(CPP) -o $@ $^ $(LDFLAGS)
+
 -include $(common_dep) # include all dep files in makefile
 -include $(InFlux_dep)
--include $(InFluxNum_dep) 
+-include $(InFluxNum_dep)
 -include $(Dproj_dep) 
+-include $(chist_dep) 
 
 %.d: %.cpp 	# rule to generate a dep file by using the g++ prepocesor
 	$(CPP) $(CPPFLAGS) -MM -MT $(@:.d=.o) $< -MF $@
@@ -50,15 +59,15 @@ Dproj: $(common_obj) $(Dproj_obj)
 %.o: %.c
 	$(CPP) $(CPPFLAGS) -o $@ -c $<
 
-.PHONY: debug InFlux InFluxNum Dproj
+.PHONY: debug InFlux InFluxNum Dproj chist
 debug: CPPFLAGS+= -DDEBUG -ggdb # debug with gdb
-debug: InFlux InFluxNum Dproj
+debug: InFlux InFluxNum Dproj chist
 
 .PHONY: clean
 clean: 
-	$(RM) $(common_obj) $(InFlux_obj) $(InFluxNum_obj) $(Dproj_obj) *.d *~ *# InFlux InfluxNum Dproj
+	$(RM) $(common_obj) $(InFlux_obj) $(InFluxNum_obj) $(Dproj_obj) $(chist_obj) *.d *~ *# InFlux InfluxNum Dproj chist
 
 .PHONY: install
-exec = InFlux InFluxNum Dproj
+exec = InFlux InFluxNum Dproj chist
 install: $(exec)
 	install $(exec) $(DESTDIR)

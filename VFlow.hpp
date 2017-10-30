@@ -11,7 +11,7 @@ int SetupVflow(const string & vflowParamsFileName);
 int CalcStdVz(eqdate rdate, double *stdVz);
 int LoadVLatLonGrid(eqdate rdate);
 int LoadVelocities(eqdate startdate, int ntau);
-
+int IsLand(vectorXYZ point);
 
 void FreeMemoryVelocities(int ntau);
 

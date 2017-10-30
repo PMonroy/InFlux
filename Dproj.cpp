@@ -109,8 +109,7 @@ int main(int argc, char **argv){
 #endif
 
 
-  // Satellite grid construction
-  
+  // Satellite grid construction  
   vector<vectorXYZ> satgrid;
   if(SatelliteGrid(DprojParams.DistSat, &grid, &satgrid)){
     cout << "Satellite grid of initial positions: [Fail]" << endl;
@@ -227,16 +226,23 @@ if((LoadVLatLonGrid(DprojParams.DepositionDate))!=0){//Load velocity grid
   vector<int> Flagfdepth(numtracers,0);
 
   vector<vectorXYZ> Vtracer;
-  vector<vectorXYZ> UnitNormalVector;
+  vector<vectorXYZ> UnitNormal;
+  vector<vectorXYZ> TangentX;
+  vector<vectorXYZ> TangentY;
+  
   Vtracer.reserve(numtracers);
-  UnitNormalVector.reserve(numtracers);
+  UnitNormal.reserve(numtracers);
+  TangentX.reserve(numtracers);
+  TangentY.reserve(numtracers);
   for(unsigned int q=0; q<numtracers; q++){
     Vtracer.push_back(vectorXYZ(0,0,0));
-    UnitNormalVector.push_back(vectorXYZ(0,0,0));
+    UnitNormal.push_back(vectorXYZ(0,0,1));
+    TangentX.push_back(vectorXYZ(DprojParams.DistSat,0,0));
+    TangentY.push_back(vectorXYZ(0,DprojParams.DistSat,0));
   }
   
   vector<double> Projection(numtracers,0);
-  vector<double> Stretching(numtracers,0);
+  vector<double> Stretching(numtracers,1.0);
   vector<double> FactorDensity(numtracers,0);
 
 #ifdef DEBUG
@@ -247,13 +253,14 @@ if((LoadVLatLonGrid(DprojParams.DepositionDate))!=0){//Load velocity grid
    * TRACER LOOP
    ****************************************************/
 
-  double t;
+  double t,period;
   
-omp_set_num_threads(20);
-#pragma omp parallel for default(shared) private(t)// Parallelizing the code for computing trajectories
+  omp_set_num_threads(20);
+#pragma omp parallel for default(shared) private(t,period)// Parallelizing the code for computing trajectories
   for (unsigned int q=0; q<numtracers; q++) {
+    period=0.0;
     for(t=tstart; ascnd==1?(t<tend):(t>=tend); t+=DprojParams.TimeStep) {
-    
+      
       //COMPUTE NEW POSITION
       tracer1[q]=tracer2[q];// it stores previous position in tracer1[q]
       sattracer1[4*q]=sattracer2[4*q];// it stores previous position in sattracer1[q]
@@ -276,7 +283,10 @@ omp_set_num_threads(20);
       double fmid=(fdepth-tracer2[q].z);
       double discriminant=f*fmid;   
 
-      if(discriminant<=0.0) {	
+      double NormCross;
+      vectorXYZ ScaleFactor,deltaX,deltaY;
+      
+      if(discriminant<=0.0) {
 	double rtb,dt;
 	rtb=0.0;
 	dt=DprojParams.TimeStep;
@@ -307,31 +317,49 @@ omp_set_num_threads(20);
 	    if(GetVflowplusVsink(ftime[q],tracer2[q],&Vtracer[q])==1){
 	      FlagRK4[q]=1;
 	      break;
-	    }
-      
-	    //COMPUTE ALL THE STUFFFFFSSSSS
-
-	    vectorXYZ TangentX;
-	    TangentX.x=rearth*cos(rads*sattracer2[4*q].y)*((sattracer2[4*q].x-sattracer2[4*q+2].x)*(rads/2.0)); 
-	    TangentX.y=rearth*((sattracer2[4*q].y-sattracer2[4*q+2].y)*(rads/2.0)); 
-	    TangentX.z=(sattracer2[4*q].z-sattracer2[4*q+2].z)/2.0;
-      
-	    vectorXYZ TangentY;        
-	    TangentY.x=rearth*cos(rads*sattracer2[q+1].y)*((sattracer2[4*q+1].x-sattracer2[4*q+3].x)*(rads/2.0)); 
-	    TangentY.y=rearth*((sattracer2[4*q+1].y-sattracer2[4*q+3].y)*(rads/2.0)); 
-	    TangentY.z=(sattracer2[4*q+1].z-sattracer2[4*q+3].z)/2.0; 
-	  
-	    vectorXYZ NormalVector=cross(TangentX,TangentY);
-	    double NormNormalVector=sqrt(scalar(NormalVector,NormalVector));
-	    UnitNormalVector[q]=(1.0/NormNormalVector)*NormalVector;
-	  
-	    Projection[q]=fabs(Vtracer[q].z/scalar(UnitNormalVector[q],Vtracer[q]));
-	    Stretching[q]=NormNormalVector/(DprojParams.DistSat*DprojParams.DistSat);
-	    FactorDensity[q]=Stretching[q]*Projection[q];
-	    break;
+	    }      
 	  }
 	}
-	break;
+      }
+      period+=DprojParams.TimeStep;
+      if(period>6*DprojParams.TimeStep || Flagfdepth[q]==1){
+	period=0.0;
+	//COMPUTE ALL THE STUFS      
+	TangentX[q].x=rearth*cos(rads*tracer2[q].y)*((sattracer2[4*q].x-sattracer2[4*q+2].x)*(rads/2.0)); 
+	TangentX[q].y=rearth*((sattracer2[4*q].y-sattracer2[4*q+2].y)*(rads/2.0)); 
+	TangentX[q].z=(sattracer2[4*q].z-sattracer2[4*q+2].z)/2.0;
+	
+	TangentY[q].x=rearth*cos(rads*tracer2[q].y)*((sattracer2[4*q+1].x-sattracer2[4*q+3].x)*(rads/2.0)); 
+	TangentY[q].y=rearth*((sattracer2[4*q+1].y-sattracer2[4*q+3].y)*(rads/2.0)); 
+	TangentY[q].z=(sattracer2[4*q+1].z-sattracer2[4*q+3].z)/2.0; 
+      
+	UnitNormal[q]=cross(TangentX[q],TangentY[q]);
+	NormCross=sqrt(scalar(UnitNormal[q],UnitNormal[q]));
+	UnitNormal[q]=(1.0/NormCross)*UnitNormal[q];
+	Stretching[q]*=(NormCross/(DprojParams.DistSat*DprojParams.DistSat));
+	
+	if(Flagfdepth[q]==1){
+	  Projection[q]=fabs(Vtracer[q].z/scalar(UnitNormal[q],Vtracer[q]));
+	  FactorDensity[q]=Stretching[q]*Projection[q];
+	  break;
+	}
+
+	//ACTUALIZE VARIABLES
+	
+	TangentX[q]=(DprojParams.DistSat/sqrt(scalar(TangentX[q],TangentX[q])))*TangentX[q];
+	TangentY[q]=cross(UnitNormal[q],TangentX[q]);
+	
+	ScaleFactor.x=degrees/(rearth*cos(rads*tracer2[q].y));
+	ScaleFactor.y=degrees/rearth;
+	ScaleFactor.z=1.0;
+	
+	deltaX=ScaleFactor*TangentX[q];
+	deltaY=ScaleFactor*TangentY[q];
+	
+	sattracer2[4*q]=tracer2[q]+deltaX;
+	sattracer2[4*q+1]=tracer2[q]+deltaY;
+	sattracer2[4*q+2]=tracer2[q]-deltaX;
+	sattracer2[4*q+3]=tracer2[q]-deltaY;
       }
     }
   }
@@ -353,6 +381,17 @@ omp_set_num_threads(20);
     rawfilename=SConfigurationFile.substr(0,lastdot);
   }
 
+  // Position FILE
+  string posfilename=rawfilename+".pos";  
+  ofstream posfile(posfilename.c_str());
+  for(unsigned int q=0; q<tracer2.size(); q++){
+    posfile<<tracer2[q]<<" ";
+    posfile<<Flagfdepth[q]<<" ";
+    posfile<<FlagRK4[q]<<endl;
+  }
+  posfile.close();
+  
+  
   // DATA FILE
 
   string datafilename=rawfilename+".dat";  
@@ -364,7 +403,7 @@ omp_set_num_threads(20);
     datafile<<FlagRK4[q]<<" ";
     datafile<<ftime[q]<<" ";
     datafile<<Vtracer[q]<<" ";
-    datafile<<UnitNormalVector[q]<<" ";
+    datafile<<UnitNormal[q]<<" ";
     datafile<<(isnan(Projection[q])?-1.0:Projection[q])<<" ";
     datafile<<(isnan(Stretching[q])?-1.0:Stretching[q])<<" ";
     datafile<<(isnan(FactorDensity[q])?-1.0:FactorDensity[q])<<endl;
@@ -419,8 +458,8 @@ omp_set_num_threads(20);
   }
 
   offile<<"VECTORS UnitNormal float"<<endl;
-  for(unsigned int q=0; q<UnitNormalVector.size(); q++){
-    offile<<UnitNormalVector[q]<<endl;
+  for(unsigned int q=0; q<UnitNormal.size(); q++){
+    offile<<UnitNormal[q]<<endl;
   }
 
   offile<<"SCALARS Projection float 1"<<endl;
@@ -432,7 +471,7 @@ omp_set_num_threads(20);
   offile<<"SCALARS Stretching float 1"<<endl;
   offile<<"LOOKUP_TABLE default"<<endl;
   for(unsigned int q=0; q<Stretching.size(); q++){
-    offile<<(isnan(Stretching[q])?0.0:Stretching[q])<<endl;
+    offile<<Stretching[q]<<endl;
   }
   
   offile<<"SCALARS FactorDensity float 1"<<endl;

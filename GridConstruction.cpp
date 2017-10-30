@@ -8,8 +8,10 @@ using namespace std;
 
 #include "VectorXYZ.hpp"
 #include "Constants.hpp"
+#include "VFlow.hpp"
+#include "mt19937ar.hpp"
 
-double frand(double fmin, double fmax);
+double RangeRand(double fmin, double fmax);
 
 int MakeRegular2DGrid(vectorXYZ domainmin, vectorXYZ intergrid, vectorXYZ domainmax, int KcompNormal,
 		      vector<vectorXYZ> *point, int *dim0, int *dim1){  
@@ -90,29 +92,30 @@ int SatelliteGrid(double InterSpacing, vector<vectorXYZ> *point, vector<vectorXY
 }
 
 
-
 int MakeRandom2DGrid(vectorXYZ domainmin, vectorXYZ domainmax, int KcompNormal, int npoints, vector<vectorXYZ> *point){
-  double x,y,z;
+
+  vectorXYZ position;
   
   (*point).reserve(npoints);
 
   if(KcompNormal<0){
-    z=domainmin.z; 
+    position.z=domainmin.z; 
   }else if(KcompNormal>0){
-    z=domainmax.z;
+    position.z=domainmax.z;
   }else{
     return 1;
   }
+  unsigned long s=1984;
+  init_genrand(s);
   
-  srand(time(NULL));
   for(int q=0; q<npoints; q++){
-    x=frand(domainmin.x, domainmax.x);
-    y=degrees*asin(frand(sin(rads*domainmin.y), sin(rads*domainmax.y)));
-    (*point).push_back(vectorXYZ(x,y,z));
+    position.x=RangeRand(domainmin.x, domainmax.x);
+    position.y=degrees*asin(RangeRand(sin(rads*domainmin.y), sin(rads*domainmax.y)));
+    if(IsLand(position)==0) (*point).push_back(position);
   }
   return 0;
 }
-double frand(double fmin, double fmax){
-    double f = (double)rand() / RAND_MAX;
-    return fmin + f * (fmax - fmin);
+double RangeRand(double fmin, double fmax){
+  double f=genrand_real1();
+  return fmin+f*(fmax-fmin);
 }

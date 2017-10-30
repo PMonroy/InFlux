@@ -27,6 +27,10 @@ unsigned int DimTime;
 vector <double> lon;
 vector <double> lat;
 
+int **land_mask;
+double **bathymetry;
+double ***refdepth;
+
 vectorXYZ**** vflow;
 double**** depth;
 
@@ -198,6 +202,70 @@ int LoadVLatLonGrid(eqdate rdate) {
     cout << "Error reading latitude variable"<<endl;
     return NC_ERR;
   }
+// Get dpt variable (it is needed to compute Bathymetry)
+  NcVar *NcVarDpt;
+  double *dpt;
+  dpt = new double [1*DimDepth*DimLat*DimLon];
+  if (!(NcVarDpt = dataFile.get_var("depth"))
+      || !NcVarDpt->set_cur(rdate.GetMday()-1, 0, 0, 0)
+      || !NcVarDpt->get(&dpt[0], 1, DimDepth, DimLat, DimLon)){
+    cout << "Error reading dpt variable"<<endl;
+    return NC_ERR;
+  }
+
+  // Get w (it is neede to compute LandMask)
+  NcVar *NcVarW;
+  double *wbuffer;
+  wbuffer = new double [1*DimDepth*DimLat*DimLon];
+  
+  if (!( NcVarW= dataFile.get_var("w"))
+      || !NcVarW->set_cur(rdate.GetMday()-1, 0, 0, 0)
+      || !NcVarW->get(&wbuffer[0], 1, DimDepth, DimLat,DimLon)){
+    cout << "Error reading wbuffer variable"<<endl;
+    return NC_ERR;
+  }
+
+  dataFile.close();// close Netcdf file
+
+  // Get the bathymetry and land_mask
+  refdepth = new double **[DimLon];
+  for(unsigned int i=0; i<DimLon; i++){
+      refdepth[i] = new double *[DimLat];
+      for(unsigned int j=0; j<DimLat; j++){
+	refdepth[i][j] = new double [DimDepth];
+      }
+  }
+
+  
+  bathymetry = new double *[DimLon];
+  land_mask = new int *[DimLon];
+  for (unsigned int i = 0; i < DimLon; i++)
+    { 
+      bathymetry[i] = new double [DimLat];
+      land_mask[i] = new int [DimLat];      
+    }
+
+  int q;
+  for(unsigned int i=0; i<DimLon; i++)
+    {
+      for(unsigned int j=0; j<DimLat; j++)
+	{	  
+	  for(unsigned int k=0; k<DimDepth; k++){
+	    q=k*(DimLon*DimLat)+j*DimLon+ i;
+	    refdepth[i][j][k]=dpt[q];
+	  }
+	   
+	  bathymetry[i][j] = refdepth[i][j][0];
+	  if(wbuffer[j*DimLon+i]==0.0)
+	    land_mask[i][j] = 1;
+	  else
+	    land_mask[i][j] = 0; 
+	}
+    }
+
+  delete[] dpt;
+  delete[] wbuffer;
+
 
   return 0;
 }
@@ -330,6 +398,49 @@ int LoadVelocities(eqdate startdate, int ntau) {
 #endif
     }
 
+  return 0;
+}
+int IsLand(vectorXYZ point){
+
+  vectorIJK IntIndex;
+  vectorXYZ DecIndex;
+  
+  /* Locate index longitude*/
+  IntIndex.i=LocateIndex(point.x, lon);
+
+  if(IntIndex.i < 0 || IntIndex.i >= int(DimLon-1))
+      return 1;
+
+  DecIndex.x=(lon[IntIndex.i+1]-point.x)/(lon[IntIndex.i+1]-lon[IntIndex.i]);
+
+  /* Locate index latitude*/
+  IntIndex.j = LocateIndex(point.y, lat);
+
+  if(IntIndex.j < 0 || IntIndex.j >= int(DimLat-1))
+      return 1;
+
+  // Transform to a more suitable coordinates
+  double PointLat=log(fabs((1.0/cos(rads*point.y))+tan(rads*point.y)));
+  double Lat0=log(fabs((1.0/cos(rads*lat[IntIndex.j]))+tan(rads*lat[IntIndex.j])));
+  double Lat1=log(fabs((1.0/cos(rads*lat[IntIndex.j+1]))+tan(rads*lat[IntIndex.j+1])));
+ 
+  DecIndex.y=(Lat1-PointLat)/(Lat1-Lat0);
+  
+  /* Depth bottom*/
+  double h=0.0, phi;
+  int flagLandMask=0;
+  for(int i=0; i<2; i++){
+    for(int j=0; j<2; j++){
+      phi=((i>0)?DecIndex.x:(1-DecIndex.x));
+      phi*=((j>0)?DecIndex.y:(1-DecIndex.y));
+      if(land_mask[IntIndex.i+i][IntIndex.j+j]==1) flagLandMask++;
+      h+=(bathymetry[IntIndex.i+i][IntIndex.j+j]*phi);
+    }
+  }
+
+  if(point.z<h || point.z>=0.0 || flagLandMask==4)
+    return 1;
+  
   return 0;
 }
 

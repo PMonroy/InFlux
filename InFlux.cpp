@@ -377,7 +377,21 @@ int main(int argc, char **argv){
     rawfilename=SConfigurationFile.substr(0,lastdot);
   }
 
-  
+
+  // Position FILE
+  string posfilename=rawfilename+".pos";  
+  ofstream posfile(posfilename.c_str());
+  for(unsigned int q=0; q<tracer2.size(); q++){
+    posfile<<tracer2[q]<<" ";
+    posfile<<Flagfdepth[q]<<" ";
+    posfile<<FlagRK4[q]<<" ";
+    double factordensity;
+    factordensity = (Vfinal[q].z/Vinitial[q].z)/exp(IntTimeTilt2[q]);
+    
+    posfile<<(isnan(factordensity)?0.0:abs(factordensity))<<endl;
+  }
+  posfile.close();
+    
   // FINAL GRID
   string VTKffilename=rawfilename+".vtk";  
   ofstream offile(VTKffilename.c_str());
