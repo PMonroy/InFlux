@@ -70,3 +70,5 @@ double genrand_real3(void);
 
 /* generates a random number on [0,1) with 53-bit resolution*/
 double genrand_res53(void);
+
+double RangeRand(double fmin, double fmax);

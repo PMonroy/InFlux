@@ -11,7 +11,6 @@ using namespace std;
 #include "VFlow.hpp"
 #include "mt19937ar.hpp"
 
-double RangeRand(double fmin, double fmax);
 
 int MakeRegular2DGrid(vectorXYZ domainmin, vectorXYZ intergrid, vectorXYZ domainmax, int KcompNormal,
 		      vector<vectorXYZ> *point, int *dim0, int *dim1){  
@@ -114,8 +113,4 @@ int MakeRandom2DGrid(vectorXYZ domainmin, vectorXYZ domainmax, int KcompNormal, 
     if(IsLand(position)==0) (*point).push_back(position);
   }
   return 0;
-}
-double RangeRand(double fmin, double fmax){
-  double f=genrand_real1();
-  return fmin+f*(fmax-fmin);
 }

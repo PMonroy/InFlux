@@ -19,6 +19,7 @@ using namespace std;
 #include "EqDate.hpp"
 #include "VectorXYZ.hpp"
 #include "VTKdump.hpp"
+#include "mt19937ar.hpp"
 
 string numprintf(int ndigits, int ndecimals, double number);
 struct CHistParameters {
@@ -28,6 +29,7 @@ struct CHistParameters {
   const vectorXYZ InterSpacing;
   const eqdate DepositionDate;
   const double TimeStep;
+  const int Random;
   const double Nparticles;
   const double Radius;
   const double Vsink;
@@ -39,11 +41,13 @@ struct CHistParameters {
   ,InterSpacing(getVectorXYZParam(CHistParamsFileName, "InterSpacing"))
   ,DepositionDate(getEqDateParam(CHistParamsFileName, "DepositionDate"))
   ,TimeStep(getDoubleParam(CHistParamsFileName, "TimeStep"))
+  ,Random(getIntParam(CHistParamsFileName, "Random"))
   ,Nparticles(getDoubleParam(CHistParamsFileName, "Nparticles"))
   ,Radius(getDoubleParam(CHistParamsFileName, "Radius"))
   ,Vsink(getDoubleParam(CHistParamsFileName, "Vsink"))
 {}
 };
+
 
 int main(int argc, char **argv){
 
@@ -79,6 +83,7 @@ int main(int argc, char **argv){
   cout << " Nparticles "<<CHistParams.Nparticles<<endl;
   cout << " Radius "<<CHistParams.Radius<<endl;
   cout << " TimeStep "<<CHistParams.TimeStep<<endl;
+  cout << " Random "<<CHistParams.Random<<endl;
   cout << " Vsink "<<CHistParams.Vsink<<endl;
 #endif
 
@@ -236,7 +241,7 @@ int main(int argc, char **argv){
   cout << "LANGRANGIAN ENGINE:" << endl;
 #endif
 
-  SetupLagrangianEngine(SConfigurationFile);
+  SetupLagrangianEngine(SConfigurationFile,CHistParams.Random);
   
   vector<vectorXYZ> ftracer,tracerBuffer;
   ftracer=itracer;
@@ -256,80 +261,106 @@ int main(int argc, char **argv){
    * TRACER LOOP
    ****************************************************/
 
-  double t;
+#ifdef DEBUG
+  cout << " Tracer loop " << endl;
+#endif
   
+  double t;
+
+  int id;
+  unsigned long seed;
+  StateRN stateMT;
+    
   omp_set_num_threads(20);
-  #pragma omp parallel for default(shared) private(t)// Parallelizing the code for computing trajectories
-  for (unsigned int q=0; q<NumTracers; q++) {
-    for(t=tstart; ascnd==1?(t<tend):(t>=tend); t+=CHistParams.TimeStep) {
+  
+  #pragma omp parallel default(shared) private(t,id,seed,stateMT)// Parallelizing the code for computing trajectories
+  {
+    id=omp_get_thread_num();
+    seed = 12345678 + (2*id+1);
+    init_sgenrand(seed, &stateMT);
+#pragma omp for
+    for (unsigned int q=0; q<NumTracers; q++) {
+      for(t=tstart; ascnd==1?(t<tend):(t>=tend); t+=CHistParams.TimeStep) {
       
-      //COMPUTE NEW POSITION
-      tracerBuffer[q]=ftracer[q];// it stores previous position in tracerBuffer[q]
-      if(RK4(t, CHistParams.TimeStep, &ftracer[q], GetVflowplusVsink)==1){
-	ftime[q]=t;
-	FlagRK4[q]=1;
-	break;
-      }
-      ftime[q]=t+CHistParams.TimeStep;
-
-      double f=(fdepth-tracerBuffer[q].z);
-      double fmid=(fdepth-ftracer[q].z);
-      double discriminant=f*fmid;   
-
-      if(discriminant<=0.0) {
-	double rtb,dt;
-	rtb=0.0;
-	dt=CHistParams.TimeStep;
-	double tmid;
-	for (int j=0;j<20;j++) {
-	  
-	  if(Flagfdepth[q]==1) break;
-	  ftracer[q]=tracerBuffer[q];
-	  tmid=rtb+(dt*=0.5);
-	  if(RK4(t, tmid, &ftracer[q], GetVflowplusVsink)==1){
-	    FlagRK4[q]=1;
-	    break;
-	  }
-	  fmid=(fdepth-ftracer[q].z);
-	  if (fmid <= 0.0) rtb=tmid;
-	  if (dt < (CHistParams.TimeStep/16.0) || fmid == 0.0){
-	    ftime[q]=t+tmid;
-	    Flagfdepth[q]=1;
-	  }
+	//COMPUTE NEW POSITION
+	tracerBuffer[q]=ftracer[q];// it stores previous position in tracerBuffer[q]
+	if(CHistParams.Random==1 && q>=NumGridTracers){
+	  FlagRK4[q]=Heun(t, CHistParams.TimeStep, &ftracer[q], GetVflowplusVsink, &stateMT);
+	} else {
+	  FlagRK4[q]=RK4(t, CHistParams.TimeStep, &ftracer[q], GetVflowplusVsink);
 	}
-      }    
-      if(Flagfdepth[q]==1) break; 
-
+	
+	if(FlagRK4[q]==1){
+	  ftime[q]=t;
+	  break;
+	}
+	
+	ftime[q]=t+CHistParams.TimeStep;
+	
+	double f=(fdepth-tracerBuffer[q].z);
+	double fmid=(fdepth-ftracer[q].z);
+	double discriminant=f*fmid;   
+	
+	if(discriminant<=0.0) {
+	  double rtb,dt;
+	  rtb=0.0;
+	  dt=CHistParams.TimeStep;
+	  double tmid;
+	  for (int j=0;j<20;j++) {	    
+	    if(Flagfdepth[q]==1) break;
+	    ftracer[q]=tracerBuffer[q];
+	    tmid=rtb+(dt*=0.5);
+	    if(CHistParams.Random==1 && q>=NumGridTracers){
+	      FlagRK4[q]=Heun(t, tmid, &ftracer[q], GetVflowplusVsink, &stateMT);
+	    } else {
+	      FlagRK4[q]=RK4(t, tmid, &ftracer[q], GetVflowplusVsink);
+	    }
+	    if(FlagRK4[q]==1) break;
+	    
+	    fmid=(fdepth-ftracer[q].z);
+	    if (fmid <= 0.0) rtb=tmid;
+	    if (dt < (CHistParams.TimeStep/16.0) || fmid == 0.0){
+	      ftime[q]=t+tmid;
+	      Flagfdepth[q]=1;
+	    }
+	  }
+	}    
+	if(Flagfdepth[q]==1) break;
+      }
     }
   }
-
-  /* Free Velocities*/
-  FreeMemoryVelocities(tau+4);
 
   /****************************************************
    * COMPUTATION NUMERICAL DENSITY
    ****************************************************/
+#ifdef DEBUG
+  cout << " Numerical density " << endl;
+#endif
+
+
   vector<int> density(NumGridTracers,0);
+  vector<double> densityGaussian(NumGridTracers,0.0);
   vector<int> densitySquare(NumGridTracers,0);
   unsigned int l;
- 
-omp_set_num_threads(20);
-#pragma omp parallel for default(shared) private(l)// Parallelizing the code for computing trajectories  
+  
+  omp_set_num_threads(20);
+  #pragma omp parallel for default(shared) private(l)// Parallelizing the code for computing trajectories
+    
   for (unsigned int q=0; q<NumGridTracers; q++) {
-
+    
     if(FlagRK4[q]==1 || Flagfdepth[q]==0) continue;
     
     vectorXYZ delta;
-
+    
     delta.x=CHistParams.Radius/(rearth*cos(ftracer[q].y*rads));
     delta.y=CHistParams.Radius/rearth;
     delta.z=0.0;
-
+    
     vectorXYZ max,min;
-
+    
     max=ftracer[q]+(degrees*delta);
     min=ftracer[q]-(degrees*delta);
-    
+      
     for(l=NumGridTracers; l<NumTracers; l++) {
       if(FlagRK4[l]==0 &&
 	 Flagfdepth[l]==1 &&
@@ -339,22 +370,74 @@ omp_set_num_threads(20);
 	 ftracer[l].y>=min.y){
 	densitySquare[q]++;
 	vectorXYZ alpha;
-
+	
 	alpha.x=cos(ftracer[q].y*rads)*rads;
 	alpha.y=rads;
 	alpha.z=0.0;
 	
 	vectorXYZ beta;
-
+	
 	beta=ftracer[q]-ftracer[l];
 	beta*=alpha;
-	
-	if(rearth*sqrt(scalar(beta,beta))<=CHistParams.Radius) 	density[q]++;
+	double norm2beta=scalar(beta,beta);
+	if(rearth*sqrt(norm2beta)<=CHistParams.Radius){
+	  density[q]++;
+	  densityGaussian[q]+=(1.0/exp((rearth*rearth*norm2beta)/((CHistParams.Radius/2.0)*(CHistParams.Radius/2.0))));
+	}
       }
     }
   }
+  
+  // LAND RATIO
 
+#ifdef DEBUG
+  cout << " computation Land Ratio " << endl;
+#endif
 
+  int land;
+  vector<double> LR(NumGridTracers,0);
+  vectorXYZ testpoint;
+  unsigned long s=123456789;
+  init_genrand(s);
+  for (unsigned int q=0; q<NumGridTracers; q++) {
+    vectorXYZ delta;
+    
+    delta.x=CHistParams.Radius/(rearth*cos(ftracer[q].y*rads));
+    delta.y=CHistParams.Radius/rearth;
+    delta.z=0.0;
+    
+    vectorXYZ max,min;
+    
+    max=ftracer[q]+(degrees*delta);
+    min=ftracer[q]-(degrees*delta);
+    
+    vectorXYZ alpha;
+	
+    alpha.x=cos(ftracer[q].y*rads)*rads;
+    alpha.y=rads;
+    alpha.z=0.0;
+    land=0;
+    l=0;
+    while(l<CHistParams.Nparticles) {
+      testpoint.x = RangeRand(min.x, max.x);
+      testpoint.y = RangeRand(min.y, max.y);
+      testpoint.z = fdepth;
+    	
+      vectorXYZ beta;
+    
+      beta=ftracer[q]-testpoint;
+      beta*=alpha;
+      double norm2beta=scalar(beta,beta);
+      if(rearth*sqrt(norm2beta)<=CHistParams.Radius){
+	l++;
+	land+=IsLand(testpoint);
+      }
+    }
+    LR[q]=double(land)/CHistParams.Nparticles;
+  }
+
+  /* Free Velocities*/
+  FreeMemoryVelocities(tau+4);
   /**********************************************
    * WRITE RESULTS
    **********************************************/
@@ -376,6 +459,7 @@ omp_set_num_threads(20);
     posfile<<ftracer[q]<<" ";
     posfile<<Flagfdepth[q]<<" ";
     posfile<<FlagRK4[q]<<" ";
+    posfile<<LR[q]<<" ";
     posfile<<density[q]/CHistParams.Nparticles<<" ";
     posfile<<density[q]<<endl;    
   }
@@ -404,6 +488,19 @@ omp_set_num_threads(20);
   for(unsigned int q=0; q<density.size(); q++) {
       offile<<density[q]<<endl;
   }  
+
+  offile<<"SCALARS LR float 1"<<endl;
+  offile<<"LOOKUP_TABLE default"<<endl;
+  for(unsigned int q=0; q<LR.size(); q++) {
+      offile<<LR[q]<<endl;
+  }  
+
+  offile<<"SCALARS densityGaussian float 1"<<endl;
+  offile<<"LOOKUP_TABLE default"<<endl;
+  for(unsigned int q=0; q<densityGaussian.size(); q++) {
+      offile<<densityGaussian[q]<<endl;
+  }  
+
   offile<<"SCALARS densitySquare int 1"<<endl;
   offile<<"LOOKUP_TABLE default"<<endl;
   for(unsigned int q=0; q<densitySquare.size(); q++) {

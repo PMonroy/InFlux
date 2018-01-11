@@ -43,6 +43,13 @@ vectorXYZ &vectorXYZ::operator*=(double scalar)
     z *= scalar;
     return *this;
 }
+vectorXYZ &vectorXYZ::operator/=(double scalar) 
+{
+    x /= scalar;
+    y /= scalar;
+    z /= scalar;
+    return *this;
+}
 vectorXYZ &vectorXYZ::operator*=(vectorXYZ a) 
 {
     x *= a.x;
@@ -82,6 +89,9 @@ vectorXYZ operator*( double scalar,vectorXYZ a) {
 vectorXYZ operator*(vectorXYZ a, double scalar) {
   return vectorXYZ(a) *= scalar;
 } 
+vectorXYZ operator/(vectorXYZ a, double scalar) {
+  return vectorXYZ(a) /= scalar;
+} 
 
 ostream &operator<<(ostream &out, vectorXYZ a)     //output
 {
@@ -101,6 +111,16 @@ vectorXYZ cross(vectorXYZ a,vectorXYZ b) {
   result.x = a.y*b.z-a.z*b.y;
   result.y = a.z*b.x-a.x*b.z;
   result.z = a.x*b.y-a.y*b.x;
+
+  return result;
+}
+
+vectorXYZ factor(double a,double b,double c) {
+  vectorXYZ result;
+
+  result.x = a;
+  result.y = b;
+  result.z = c;
 
   return result;
 }

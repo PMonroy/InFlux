@@ -12,23 +12,38 @@ using namespace std;
 #include "VFlow.hpp" // Functions to read velocities 
 #include "Constants.hpp"
 #include "ParseParameters.hpp"
-
+#include "mt19937arParallel.hpp"
 
 double vsink;
+vectorXYZ sigma;
 double Dh;
 double Dz;
 
-//Functions
-double gasdev(double (*nrand)(void ));
-
-int SetupLagrangianEngine(const string & LagEngParamsFileName) {
+int SetupLagrangianEngine(const string & LagEngParamsFileName, int random) {
   vsink=getDoubleParam(LagEngParamsFileName, "Vsink");
 
+  if(random==1){
+  vectorXYZ diffusivity;
+  diffusivity=getVectorXYZParam(LagEngParamsFileName, "Diffusivity");
+
+  sigma.x = sqrt(2.0*diffusivity.x*secondsday);
+  sigma.y = sqrt(2.0*diffusivity.y*secondsday);
+  sigma.z = sqrt(2.0*diffusivity.z*secondsday);
+  
 #ifdef DEBUG
   cout << "Lagragian  parameters";
-  cout << " vsink = "<< vsink <<endl;
+  cout << " Vsink = "<< vsink <<endl;
+  cout << " Diffusivity = "<< diffusivity <<endl;
+  cout << " Sigma = "<< sigma <<endl;
   cout << endl;
 #endif
+  }
+    
+#ifdef DEBUG
+  cout << "Lagragian  parameters";
+  cout << " Vsink = "<< vsink <<endl;
+  cout << endl;
+#endif  
   
   return 0;
 }
@@ -102,6 +117,55 @@ int GetVflowplusVsink(double t,vectorXYZ point, vectorXYZ *vint) {
     return 1;
   
   vint->z = vint->z - vsink;
+  return 0;
+}
+
+int Heun(double t0, double intstep, vectorXYZ *point, int (*velocity)(double ,vectorXYZ , vectorXYZ* ),StateRN *state)
+{
+  vectorXYZ point1,point2;
+  vectorXYZ v1,v2;
+  vectorXYZ g1,g2;
+  vectorXYZ u, uh, aux;
+  vectorXYZ k,l;
+  double h;
+
+  u.x = sgaussrand(state); 
+  u.y = sgaussrand(state); 
+  u.z = sgaussrand(state); 
+  
+  /* Calculate V1: */
+  point1 = *point;
+  if(velocity(t0, point1, &v1))
+    return 1;
+  h = rearth * cos(rads*(point1.y));
+  v1.x = degrees*(v1.x / h ); 
+  v1.y = degrees*(v1.y / rearth);
+
+  /* Calculate G1*/
+  g1 = sigma;
+  g1.x = degrees*(g1.x / h );
+  g1.y = degrees*(g1.y / rearth);
+ 
+
+  /* Calculate V2: */
+  uh=sqrt(intstep)*u;
+  aux = intstep * v1 + uh * g1;
+  point2 = point1 + aux;
+
+  if(velocity(t0+intstep,point2, &v2))
+    return 1;
+  h = rearth * cos(rads*(point2.y));
+  v2.x = degrees*(v2.x / h ); // rads velocity
+  v2.y = degrees*(v2.y / rearth); // rads velocity
+
+  /* Calculate G2*/
+  g2 = sigma;
+  g2.x = degrees*(g2.x / h ); // rads velocity
+  g2.y = degrees*(g2.y / rearth); // rads velocity
+
+  /* Compute the new position */
+  *point += 0.5*(aux + intstep*v2+ uh*g2);
+
   return 0;
 }
 

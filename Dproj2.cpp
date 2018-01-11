@@ -246,8 +246,9 @@ if((LoadVLatLonGrid(DprojParams.DepositionDate))!=0){//Load velocity grid
     TangentY.push_back(vectorXYZ(0,DprojParams.DistSat,0));
   }
   
-  vector<double> Projection(numtracers,0);
-  vector<double> Stretching(numtracers,1.0);
+
+  vector<double> StretchingArea(numtracers,1.0);
+  vector<double> StretchingLength(numtracers,1.0);
   vector<double> FactorDensity(numtracers,0);
 
 #ifdef DEBUG
@@ -341,23 +342,46 @@ if((LoadVLatLonGrid(DprojParams.DepositionDate))!=0){//Load velocity grid
 	UnitNormal[q]=cross(TangentX[q],TangentY[q]);
 	NormCross=sqrt(scalar(UnitNormal[q],UnitNormal[q]));
 	UnitNormal[q]=(1.0/NormCross)*UnitNormal[q];
-	//Stretching[q]*=(NormCross/(DprojParams.DistSat*DprojParams.DistSat));
-	Stretching[q]*=((DprojParams.DistSat*DprojParams.DistSat)/NormCross);
+	
+	StretchingArea[q]*=(NormCross/(DprojParams.DistSat*DprojParams.DistSat));
+	double normX=sqrt(scalar(TangentX[q],TangentX[q]));
+	double normY=sqrt(scalar(TangentY[q],TangentY[q]));
+	vectorXYZ UnitTangentX=(1.0/normX)*TangentX[q];
+	vectorXYZ UnitTangentY=(1.0/normY)*TangentY[q];
+	vectorXYZ UnitTangentMax;
+
+	if(normX>=normY){
+	  StretchingLength[q]*=(normX/DprojParams.DistSat);
+	  UnitTangentMax=UnitTangentX;
+	}else{
+	  StretchingLength[q]*=(normY/DprojParams.DistSat);
+	  UnitTangentMax=UnitTangentY;
+	}
 	if(Flagfdepth[q]==1){
-	  Projection[q]=fabs(Vtracer[q].z/scalar(UnitNormal[q],Vtracer[q]));
-	  FactorDensity[q]=Stretching[q]*Projection[q];
+	  double normV=sqrt(scalar(Vtracer[q],Vtracer[q]));
+	  vectorXYZ UnitV=(1.0/normV)*Vtracer[q];
+	  vectorXYZ nv=cross(UnitNormal[q],UnitV);
+	  double cosphi=scalar(UnitTangentMax,nv);
+	  cosphi=0.0;
+	  //double alpha=Vtracer[q].z/scalar(nv,Vtracer[q]);
+	  double alpha=(Vtracer[q].z/normV)/((scalar(UnitNormal[q],Vtracer[q])/normV)*(scalar(UnitNormal[q],Vtracer[q])/normV)-1.0);
+	  double beta;
+	  beta=((StretchingArea[q]*cosphi)/StretchingLength[q]);
+	  beta=beta*beta;
+	  beta=beta+(StretchingLength[q]*StretchingLength[q])*(1.0-(cosphi*cosphi));
+	  beta=sqrt(beta);
+	  FactorDensity[q]=fabs(alpha)*beta;
 	  break;
 	}
 
 	//ACTUALIZE VARIABLES
-	double norm2X=scalar(TangentX[q],TangentX[q]);
-	double norm2Y=scalar(TangentY[q],TangentY[q]);
-	if(norm2X>norm2Y){
-	  TangentX[q]=(DprojParams.DistSat/sqrt(norm2X))*TangentX[q];
+
+	if(normX>normY){
+	  TangentX[q]=(DprojParams.DistSat/normX)*TangentX[q];
 	  TangentY[q]=cross(UnitNormal[q],TangentX[q]);
 	}else {
-	  TangentY[q]=(DprojParams.DistSat/sqrt(norm2Y))*TangentY[q];
-	  TangentX[q]=cross(TangentY[q],UnitNormal[q]);
+	  TangentX[q]=(DprojParams.DistSat/normY)*TangentY[q];
+	  TangentY[q]=cross(UnitNormal[q],TangentX[q]);
 	}
 	
 	ScaleFactor.x=degrees/(rearth*cos(rads*tracer2[q].y));
@@ -399,8 +423,6 @@ if((LoadVLatLonGrid(DprojParams.DepositionDate))!=0){//Load velocity grid
     posfile<<tracer2[q]<<" ";
     posfile<<Flagfdepth[q]<<" ";
     posfile<<FlagRK4[q]<<" ";
-    posfile<<(isnan(Projection[q])?-1.0:Projection[q])<<" ";
-    posfile<<(isnan(Stretching[q])?-1.0:Stretching[q])<<" ";
     posfile<<(isnan(FactorDensity[q])?-1.0:FactorDensity[q])<<endl;
   }
   posfile.close();
@@ -418,8 +440,6 @@ if((LoadVLatLonGrid(DprojParams.DepositionDate))!=0){//Load velocity grid
     datafile<<ftime[q]<<" ";
     datafile<<Vtracer[q]<<" ";
     datafile<<UnitNormal[q]<<" ";
-    datafile<<(isnan(Projection[q])?-1.0:Projection[q])<<" ";
-    datafile<<(isnan(Stretching[q])?-1.0:Stretching[q])<<" ";
     datafile<<(isnan(FactorDensity[q])?-1.0:FactorDensity[q])<<endl;
   }
   datafile.close();
@@ -475,23 +495,15 @@ if((LoadVLatLonGrid(DprojParams.DepositionDate))!=0){//Load velocity grid
   for(unsigned int q=0; q<UnitNormal.size(); q++){
     offile<<UnitNormal[q]<<endl;
   }
-
-  offile<<"SCALARS Projection float 1"<<endl;
-  offile<<"LOOKUP_TABLE default"<<endl;
-  for(unsigned int q=0; q<Projection.size(); q++){
-    offile<<(isnan(Projection[q])?0.0:Projection[q])<<endl;
-  }
-
-  offile<<"SCALARS Stretching float 1"<<endl;
-  offile<<"LOOKUP_TABLE default"<<endl;
-  for(unsigned int q=0; q<Stretching.size(); q++){
-    offile<<Stretching[q]<<endl;
-  }
   
   offile<<"SCALARS FactorDensity float 1"<<endl;
   offile<<"LOOKUP_TABLE default"<<endl;
   for(unsigned int q=0; q<FactorDensity.size(); q++){
-    offile<<(isnan(FactorDensity[q])?0.0:FactorDensity[q])<<endl;
+    if(isnan(FactorDensity[q]) || isinf(FactorDensity[q])){
+	offile<<0.0<<endl;
+    }else{
+	offile<<FactorDensity[q]<<endl;
+    }  
   }
   
   offile.close();

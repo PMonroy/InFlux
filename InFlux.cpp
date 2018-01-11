@@ -19,6 +19,7 @@ using namespace std;
 #include "EqDate.hpp"
 #include "VectorXYZ.hpp"
 #include "VTKdump.hpp"
+#include "mt19937arParallel.hpp"
 
 string numprintf(int ndigits, int ndecimals, double number);
 struct InFluxParameters {
@@ -28,6 +29,7 @@ struct InFluxParameters {
   const vectorXYZ InterSpacing;
   const eqdate DepositionDate;
   const double TimeStep;
+  const int Random;
   const double Vsink;
   
   // Define a constructor that will load stuff from a configuration file.
@@ -37,6 +39,7 @@ struct InFluxParameters {
   ,InterSpacing(getVectorXYZParam(InFluxParamsFileName, "InterSpacing"))
   ,DepositionDate(getEqDateParam(InFluxParamsFileName, "DepositionDate"))
   ,TimeStep(getDoubleParam(InFluxParamsFileName, "TimeStep"))
+  ,Random(getIntParam(InFluxParamsFileName, "Random"))
   ,Vsink(getDoubleParam(InFluxParamsFileName, "Vsink"))
 {}
 };
@@ -73,6 +76,7 @@ int main(int argc, char **argv){
   cout<<InFluxParams.DepositionDate.GetMonth()<<"-";
   cout<<InFluxParams.DepositionDate.GetYear()<<endl;
   cout << " TimeStep "<<InFluxParams.TimeStep<<endl;
+  cout << " Random "<<InFluxParams.Random<<endl;
   cout << " Vsink "<<InFluxParams.Vsink<<endl;
 #endif
 
@@ -191,7 +195,7 @@ int main(int argc, char **argv){
   cout << "LANGRANGIAN ENGINE:" << endl;
 #endif
 
-  SetupLagrangianEngine(SConfigurationFile);
+  SetupLagrangianEngine(SConfigurationFile, InFluxParams.Random);
   
   vector<vectorXYZ> tracer1,tracer2;
 
@@ -201,11 +205,22 @@ int main(int argc, char **argv){
   unsigned int numtracers=numgridpoints;
   vector<vectorXYZ> V1(numtracers),V2(numtracers);
   vector<vectorXYZ> Vinitial(numtracers),Vfinal(numtracers);
+  vector<vectorXYZ> nu1(numtracers),nu2(numtracers);
+  
+  vector<double> logmu1(numtracers),logmu2(numtracers);
+  vector<double> mu1(numtracers),mu2(numtracers);
+  vector<vectorXYZ> UnitNormal(numtracers);
+  
+
   vector<vectorXYZ> dVdt1(numtracers),dVdt2(numtracers);
   vector<vectorXYZ> gradVz1(numtracers),gradVz2(numtracers);
-  vector<vectorXYZ> gradh1(numtracers),gradh2(numtracers);
   
-  vector<double> IntDivergence(numtracers),IntGradVz(numtracers), IntTimeTilt(numtracers),IntTimeTilt2(numtracers); 
+  vector<vectorXYZ> alpha1(numtracers),alpha2(numtracers);
+  vector<vectorXYZ> beta1(numtracers),beta2(numtracers);
+  vector<double> lambda1(numtracers),lambda2(numtracers);
+  
+  vector<double> logIntDiv(numtracers),logIntGradVz(numtracers), logIntH(numtracers);
+  
   vector<double> ftime(numtracers,0.0);
   vector<int> FlagRK4(numtracers,0);
 
@@ -229,14 +244,31 @@ int main(int argc, char **argv){
       FlagRK4[q]=1;      
       continue;
     }
-    IntDivergence[q]=0.0;
-    IntGradVz[q]=0.0;
-    IntTimeTilt[q]=0.0;
-    IntTimeTilt2[q]=0.0;
+    logIntDiv[q]=0.0;
+    logIntGradVz[q]=0.0;
+    logIntH[q]=0.0;
 
-    gradh1[q].x=0.0;
-    gradh1[q].y=0.0;
-    gradh1[q].z=0.0;
+    nu2[q]=V2[q]/V2[q].z;
+
+    UnitNormal[q].x=0.0;
+    UnitNormal[q].y=0.0;
+    UnitNormal[q].z=0.0;
+    
+    alpha2[q].x=dVdt2[q].x-nu2[q].x*dVdt2[q].z;
+    alpha2[q].y=dVdt2[q].y-nu2[q].y*dVdt2[q].z;
+    alpha2[q].z=0.0;
+
+    logmu2[q]=0.0;
+    mu2[q]=exp(logmu2[q]);
+
+    beta2[q].x=0.0;
+    beta2[q].y=0.0;
+    beta2[q].z=mu2[q];
+    
+    lambda2[q]=scalar(alpha2[q],beta2[q])/scalar(V2[q],beta2[q]);
+
+
+ 
   }
 
   Vinitial=V2;
@@ -247,7 +279,7 @@ int main(int argc, char **argv){
 
   double t;
   
-  omp_set_num_threads(5);
+   omp_set_num_threads(5);
   #pragma omp parallel for default(shared) private(t)// Parallelizing the code for computing trajectories
   for (unsigned int q=0; q<numtracers; q++) {
     /****************************************************
@@ -260,6 +292,7 @@ int main(int argc, char **argv){
       if(RK4(t, InFluxParams.TimeStep, &tracer2[q], GetVflowplusVsink)==1){
 	ftime[q]=t;
 	FlagRK4[q]=1;
+	if(Flagfdepth[q]==1) cout<<"SORPRESA1!!"<<endl;
 	break;
       }
       
@@ -296,6 +329,7 @@ int main(int argc, char **argv){
       
       //Store the previous value
       V1[q]=V2[q];
+      nu1[q]=nu2[q];
       gradVz1[q]=gradVz2[q];
       dVdt1[q]=dVdt2[q];
       
@@ -304,72 +338,71 @@ int main(int argc, char **argv){
 	 || GradientVz(t+dt,tracer2[q],&gradVz2[q])==1
 	 || TimeDerivativeV(t+dt,tracer2[q], &dVdt2[q])==1){
 	ftime[q]=t+dt;
-	FlagRK4[q]=1;	
+	FlagRK4[q]=1;
 	break;
       }
+      nu2[q]=V2[q]/V2[q].z;
       
+      //compute mu
+      logmu1[q]=logmu2[q];
+      mu1[q]=mu2[q];
       
-      gradh1[q]=gradh2[q];//Store previous value
-      gradh2[q].x=gradh1[q].x+((gradVz1[q].x+gradVz2[q].x)*(dt/2.0)); 
-      gradh2[q].y=gradh1[q].y+((gradVz1[q].y+gradVz2[q].y)*(dt/2.0)); 
-      gradh2[q].z=0.0;
-	
-      vectorXYZ Vnorm1=(1.0/V1[q].z)*V1[q];
-      vectorXYZ Vnorm2=(1.0/V2[q].z)*V2[q];
+      logmu2[q]=logmu1[q]-((gradVz1[q].z+gradVz2[q].z)*(dt/2.0));
+      mu2[q]=exp(logmu2[q]);
       
-      IntDivergence[q]+=(gradVz1[q].z+gradVz2[q].z)*(dt/2.0);
-      IntGradVz[q]+=(gradVz1[q].x*Vnorm1.x+gradVz1[q].y*Vnorm1.y+gradVz2[q].x*Vnorm2.x+gradVz2[q].y*Vnorm2.y)*(dt/2.0);
+      //compute beta(=gradh)
+      beta1[q]=beta2[q];//Store previous value
       
-      vectorXYZ dVnorm1dt;
-      vectorXYZ dVnorm2dt;
+      beta2[q].x=beta1[q].x-((mu1[q]*gradVz1[q].x+mu2[q]*gradVz2[q].x)*(dt/2.0)); 
+      beta2[q].y=beta1[q].y-((mu1[q]*gradVz1[q].y+mu2[q]*gradVz2[q].y)*(dt/2.0)); 
+      beta2[q].z=1.0;
       
-      dVnorm1dt.x=(1.0/V1[q].z)*dVdt1[q].x-(V1[q].x/(V1[q].z*V1[q].z))*dVdt1[q].z;
-      dVnorm1dt.y=(1.0/V1[q].z)*dVdt1[q].y-(V1[q].y/(V1[q].z*V1[q].z))*dVdt1[q].z;
-      dVnorm1dt.z=0.0;
+      // compute alpha(=dvdt normalized with vz)
       
-      dVnorm2dt.x=(1.0/V2[q].z)*dVdt2[q].x-(V2[q].x/(V2[q].z*V2[q].z))*dVdt2[q].z;
-      dVnorm2dt.y=(1.0/V2[q].z)*dVdt2[q].y-(V2[q].y/(V2[q].z*V2[q].z))*dVdt2[q].z;
-      dVnorm2dt.z=0.0;
+      alpha1[q]=alpha2[q];
       
-      double div1=scalar(gradh1[q],dVnorm1dt)/(1.0-scalar(gradh1[q],Vnorm1));
-      double div2=scalar(gradh2[q],dVnorm2dt)/(1.0-scalar(gradh2[q],Vnorm2));
-      
-      IntTimeTilt[q]+=(div1+div2)*(dt/2.0);
+      alpha2[q].x=dVdt2[q].x-nu2[q].x*dVdt2[q].z;
+      alpha2[q].y=dVdt2[q].y-nu2[q].y*dVdt2[q].z;
+      alpha2[q].z=0.0;
 
-      // NEWWWWW
+      // compute lambda
 
-      double numerator1;
-      double numerator2;
+      lambda1[q]=lambda2[q];
+      
+      lambda2[q]=scalar(alpha2[q],factor(1.0/mu2[q],1.0/mu2[q],1.0)*beta2[q])/scalar(V2[q],factor(1.0/mu2[q],1.0/mu2[q],1.0)*beta2[q]);
 
-      numerator1 = -gradh1[q].x*dVdt1[q].x-gradh1[q].y*dVdt1[q].y+dVdt1[q].z;
-      numerator2 = -gradh2[q].x*dVdt2[q].x-gradh2[q].y*dVdt2[q].y+dVdt2[q].z;
 
-      double denominator1;
-      double denominator2;
-
-      denominator1 = -gradh1[q].x*V1[q].x-gradh1[q].y*V1[q].y+V1[q].z;
-      denominator2 = -gradh2[q].x*V2[q].x-gradh2[q].y*V2[q].y+V2[q].z;
-
-      IntTimeTilt2[q]+=((numerator1/denominator1)+(numerator2/denominator2))*(dt/2.0);
-
+      // compute logInts
+      
+      logIntGradVz[q]+=(scalar(gradVz1[q],nu1[q])+scalar(gradVz2[q],nu2[q]))*(dt/2.0);
+      
+      logIntDiv[q]+=(gradVz1[q].z+gradVz2[q].z)*(dt/2.0);
+      
+      logIntH[q]+=(lambda1[q]+lambda2[q])*(dt/2.0);
+      
       if(Flagfdepth[q]==1){
+	//Unit normal vector
+
+	UnitNormal[q].z=1.0/(sqrt(1+scalar(factor(1.0/mu2[q],1.0/mu2[q],0.0)*beta2[q],factor(1.0/mu2[q],1.0/mu2[q],0.0)*beta2[q])));
+	UnitNormal[q].x=(beta2[q].x/mu2[q])/UnitNormal[q].z;
+	UnitNormal[q].y=(beta2[q].y/mu2[q])/UnitNormal[q].z;	
 	Vfinal[q]=V2[q];
 	break;
       }
     }
-  }
+  } 
   
 
 
   /* Free Velocities*/
-
+  
   FreeMemoryVelocities(tau+4);
 
   /**********************************************
    * WRITE RESULTS
    **********************************************/
 
-  string rawfilename;;
+  string rawfilename;
   size_t lastdot = SConfigurationFile.find_last_of(".");
   if(lastdot == string::npos){
     rawfilename=SConfigurationFile;
@@ -377,6 +410,7 @@ int main(int argc, char **argv){
     rawfilename=SConfigurationFile.substr(0,lastdot);
   }
 
+  
 
   // Position FILE
   string posfilename=rawfilename+".pos";  
@@ -386,10 +420,18 @@ int main(int argc, char **argv){
     posfile<<Flagfdepth[q]<<" ";
     posfile<<FlagRK4[q]<<" ";
     double factordensity;
-    factordensity = (Vfinal[q].z/Vinitial[q].z)/exp(IntTimeTilt2[q]);
-    
-    posfile<<(isnan(factordensity)?0.0:abs(factordensity))<<endl;
+    factordensity = exp(logIntGradVz[q]+logIntH[q]);
+    if(isinf(factordensity) || isnan(factordensity)){
+      posfile<<0.0<<" ";;
+    } else {
+      posfile<<factordensity<<" ";;
+    }
+    posfile<<UnitNormal[q]<<" ";
+    posfile<<Vfinal[q]<<" ";
+    posfile<<mu2[q]<<endl;
   }
+
+
   posfile.close();
     
   // FINAL GRID
@@ -433,38 +475,69 @@ int main(int argc, char **argv){
       offile<<tracer2[q].z<<endl;
   }
   
-  offile<<"SCALARS intdivergence float 1"<<endl;
+  offile<<"SCALARS logIntGradVz float 1"<<endl;
   offile<<"LOOKUP_TABLE default"<<endl;
-  for(unsigned int q=0; q<IntDivergence.size(); q++){
-    offile<<IntDivergence[q]<<endl;
+  for(unsigned int q=0; q<logIntGradVz.size(); q++){
+    if(isinf(logIntGradVz[q]) || isnan(logIntGradVz[q])){
+      offile<<0.0<<endl;
+    } else {
+      offile<<logIntGradVz[q]<<endl;
+    }
   }
 
-  offile<<"SCALARS IntTimeTilt float 1"<<endl;
+  offile<<"SCALARS logIntDiv float 1"<<endl;
   offile<<"LOOKUP_TABLE default"<<endl;
-  for(unsigned int q=0; q<IntTimeTilt.size(); q++){
-    offile<<(isnan(IntTimeTilt[q])?0.0:IntTimeTilt[q])<<endl;
+  for(unsigned int q=0; q<logIntDiv.size(); q++){
+  if(isinf(logIntDiv[q]) || isnan(logIntDiv[q])){
+      offile<<0.0<<endl;
+    } else {
+    offile<<exp(logIntDiv[q])<<endl;
+    }
   }
 
-  offile<<"SCALARS IntTimeTilt2 float 1"<<endl;
+  offile<<"SCALARS logIntH float 1"<<endl;
   offile<<"LOOKUP_TABLE default"<<endl;
-  for(unsigned int q=0; q<IntTimeTilt2.size(); q++){
-    offile<<(isnan(IntTimeTilt2[q])?0.0:IntTimeTilt2[q])<<endl;
+  for(unsigned int q=0; q<logIntH.size(); q++){
+    if(isinf(logIntH[q]) || isnan(logIntH[q])){
+      offile<<0.0<<endl;
+    } else {
+      offile<<logIntH[q]<<endl;
+    }
+  }
+
+  offile<<"SCALARS mu float 1"<<endl;
+  offile<<"LOOKUP_TABLE default"<<endl;
+  for(unsigned int q=0; q<mu2.size(); q++){
+      offile<<mu2[q]<<endl;
+  }
+
+  offile<<"VECTORS UnitNormal float"<<endl;
+  for(unsigned int q=0; q<UnitNormal.size(); q++){
+    offile<<UnitNormal[q]<<endl;
   }
 
   offile<<"SCALARS FactorDensity float 1"<<endl;
   offile<<"LOOKUP_TABLE default"<<endl;
-  for(unsigned int q=0; q<IntTimeTilt2.size(); q++){
+  for(unsigned int q=0; q<logIntH.size(); q++){
     double factordensity;
-    factordensity = (Vfinal[q].z/Vinitial[q].z)/exp(IntTimeTilt2[q]);
-    
-    offile<<(isnan(factordensity)?0.0:abs(factordensity))<<endl;
+    factordensity = exp(logIntGradVz[q]+logIntH[q]);
+    if(isinf(factordensity) || isnan(factordensity)){
+      offile<<0.0<<endl;
+    } else {
+      offile<<factordensity<<endl;
+    }
   }
 
-
-  offile<<"SCALARS IntGradVz float 1"<<endl;
+  offile<<"SCALARS FactorDensity2 float 1"<<endl;
   offile<<"LOOKUP_TABLE default"<<endl;
-  for(unsigned int q=0; q<IntGradVz.size(); q++){
-    offile<<IntGradVz[q]<<endl;
+  for(unsigned int q=0; q<logIntH.size(); q++){
+    double factordensity;
+    factordensity = exp(logIntGradVz[q]);
+    if(isinf(factordensity) || isnan(factordensity)){
+      offile<<0.0<<endl;
+    } else {
+      offile<<factordensity<<endl;
+    }
   }
 
   offile<<"VECTORS V2 float"<<endl;

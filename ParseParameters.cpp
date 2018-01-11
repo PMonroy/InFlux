@@ -259,3 +259,58 @@ int GetcmdlineParameters(int narg,char ** cmdarg, string *FileName){
 
   return 0;
 }
+int GetcmdlineCGParameters(int narg, char ** cmdarg, string *FileName, double *Radius){
+
+  int opt;
+  int FileNameFlag=0; // File Name flag option
+  int FileRadiusFlag=0; // File Name flag option
+
+  while((opt = getopt(narg, cmdarg, "f:hr:")) != -1){
+    switch(opt){
+    case 'f':
+      FileNameFlag++;
+      if(optarg) 
+	*FileName = optarg;
+      else 
+	return 1;
+      break;
+    case 'r':
+      FileRadiusFlag++;
+      if(optarg) 
+	*Radius = atof(optarg);
+      else 
+	return 1;
+      break;
+    case 'h':
+      cout<<"Usage: "<< cmdarg[0] <<" [OPTIONS]"<<endl;
+      cout<<" -f [file]      Where [file] is the input file parmeters (mandatory)" <<endl;
+      cout<<" -h             Print this help and exit (optional)"<<endl;
+      return 1;
+
+    case '?':
+      cout << "Try "<<cmdarg[0]<<" -h for more information"<<endl;
+      return 1;
+    }
+  }
+  
+  /* Check mandatory or repeated options*/
+
+  if(FileNameFlag==0){//Check if file option is set  
+    cout << "Error: Option -f <file> is mandatory" <<endl;
+    cout << "Try "<<cmdarg[0]<<" -h for more information"<<endl;
+    return 1;
+  }
+  else if (FileNameFlag>1){//Check if file option is repeated
+    cout << "Warning: Option -f is repeated. Parameters file now is the last one ("<<*FileName<<")"<<endl;
+  }
+  if(FileRadiusFlag==0){//Check if file option is set  
+    cout << "Error: Option -r <double> is mandatory" <<endl;
+    cout << "Try "<<cmdarg[0]<<" -h for more information"<<endl;
+    return 1;
+  }
+  else if (FileRadiusFlag>1){//Check if file option is repeated
+    cout << "Warning: Option -r is repeated. Parameter radius now is the last one ("<<*Radius<<")"<<endl;
+  }
+
+  return 0;
+}

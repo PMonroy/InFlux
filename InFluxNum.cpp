@@ -29,6 +29,7 @@ struct InFluxNumParameters {
   const eqdate DepositionDate;
   const double TimeStep;
   const double Vsink;
+  const int Random;
   const int NumPoints;
   
   // Define a constructor that will load stuff from a configuration file.
@@ -39,6 +40,7 @@ struct InFluxNumParameters {
   ,DepositionDate(getEqDateParam(InFluxNumParamsFileName, "DepositionDate"))
   ,TimeStep(getDoubleParam(InFluxNumParamsFileName, "TimeStep"))
   ,Vsink(getDoubleParam(InFluxNumParamsFileName, "Vsink"))
+  ,Random(getIntParam(InFluxNumParamsFileName, "Random"))
   ,NumPoints(getIntParam(InFluxNumParamsFileName, "NumPoints"))
 {}
 };
@@ -198,7 +200,7 @@ int main(int argc, char **argv){
   cout << "LANGRANGIAN ENGINE:" << endl;
 #endif
 
-  SetupLagrangianEngine(SConfigurationFile);
+  SetupLagrangianEngine(SConfigurationFile, InFluxNumParams.Random);
   
   vector<vectorXYZ> buffertracer,ftracer;
 

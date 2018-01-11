@@ -20,7 +20,9 @@ class  vectorXYZ
   vectorXYZ &operator+=(vectorXYZ a); 
   vectorXYZ &operator-=(vectorXYZ a); 
   vectorXYZ &operator*=(vectorXYZ a);
-  vectorXYZ &operator*=(double scalar); 
+  vectorXYZ &operator*=(double scalar);
+  vectorXYZ &operator/=(double scalar);
+  
   vectorXYZ &operator/=(vectorXYZ a);
 
   vectorXYZ operator+( vectorXYZ a);      // Addition
@@ -36,9 +38,11 @@ class  vectorXYZ
 
 vectorXYZ  operator*(double scalar, vectorXYZ a); // Product element by element
 vectorXYZ  operator*(vectorXYZ a,double scalar);  // Product element by element
+vectorXYZ  operator/(vectorXYZ a,double scalar);  // Quotient element by element
 
 double  scalar(vectorXYZ a,vectorXYZ b);  // Scalar product 
 vectorXYZ  cross(vectorXYZ a,vectorXYZ b);  // Vectorial product
+vectorXYZ factor(double a,double b,double c);
 
 bool operator==(vectorXYZ a,vectorXYZ b);
 
