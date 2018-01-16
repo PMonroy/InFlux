@@ -78,8 +78,8 @@ int main(int argc, char **argv){
   cout << " DomainTR "<< CHistParams.DomainTR<<endl;
   cout << " InterSpacing "<< CHistParams.InterSpacing<<endl;  
   cout << " Deposition Date "<< CHistParams.DepositionDate.GetMday()<<"-";
-  cout<<CHistParams.DepositionDate.GetMonth()<<"-";
-  cout<<CHistParams.DepositionDate.GetYear()<<endl;  
+  cout << CHistParams.DepositionDate.GetMonth()<<"-";
+  cout << CHistParams.DepositionDate.GetYear()<<endl;  
   cout << " Nparticles "<<CHistParams.Nparticles<<endl;
   cout << " Radius "<<CHistParams.Radius<<endl;
   cout << " TimeStep "<<CHistParams.TimeStep<<endl;
@@ -88,7 +88,6 @@ int main(int argc, char **argv){
 #endif
 
   // Total number of particles seeded
-
   double idensity;
 
   idensity=CHistParams.Nparticles/(pi*CHistParams.Radius*CHistParams.Radius);
@@ -127,7 +126,7 @@ int main(int argc, char **argv){
   cout<<" [OK] " << endl;//Verbose: loading velocities from model 
 #endif
 
-  vector<vectorXYZ> itracer;
+  vector<vectorXYZ> Grid;
   int KcompNormal=2*(CHistParams.TimeStep>0)-1;
   int GridDimx, GridDimy;
 
@@ -135,22 +134,24 @@ int main(int argc, char **argv){
 		       CHistParams.InterSpacing, 
 		       CHistParams.DomainTR,
 		       KcompNormal,
-		       &itracer,
+		       &Grid,
 		       &GridDimx,
 		       &GridDimy)){//Grid construction 
     cout << "Regular grid initial positions: [Fail]" << endl;
     return 1;
   }
-  unsigned int NumGridTracers=itracer.size();
+  unsigned int NumGrid=Grid.size();
+  
 #ifdef DEBUG
   cout<<endl;
   cout << "Grid Initial Position: "<<endl; 
-  cout << " Num. grid points "<< itracer.size() <<endl;
+  cout << " Num. grid points "<< Grid.size() <<endl;
   cout << " Dim x "<< GridDimx << endl;
   cout << " Dim y "<< GridDimy << endl;
-  cout << " depth " << itracer[0].z<< endl;
+  cout << " depth " << Grid[0].z<< endl;
 #endif
-
+  
+  vector<vectorXYZ> itracer;
   if(MakeRandom2DGrid(CHistParams.DomainBL,
 		      CHistParams.DomainTR,
 		      KcompNormal,
@@ -159,15 +160,12 @@ int main(int argc, char **argv){
     cout << "Regular tracer initial positions: [Fail]" << endl;
     return 1;
   }
-
   unsigned int NumTracers=itracer.size();
-  unsigned int NumSampleTracers=NumTracers-NumGridTracers;
     
 #ifdef DEBUG
   cout<<endl;
   cout << "Initial number of tracers:"<<endl; 
   cout << " Number of tracers "<< NumTracers <<endl;
-  cout << " Number of Sample tracers "<< NumSampleTracers <<endl;
 #endif
 
   /********************************************************************************
@@ -284,7 +282,7 @@ int main(int argc, char **argv){
       
 	//COMPUTE NEW POSITION
 	tracerBuffer[q]=ftracer[q];// it stores previous position in tracerBuffer[q]
-	if(CHistParams.Random==1 && q>=NumGridTracers){
+	if(CHistParams.Random==1){
 	  FlagRK4[q]=Heun(t, CHistParams.TimeStep, &ftracer[q], GetVflowplusVsink, &stateMT);
 	} else {
 	  FlagRK4[q]=RK4(t, CHistParams.TimeStep, &ftracer[q], GetVflowplusVsink);
@@ -310,7 +308,7 @@ int main(int argc, char **argv){
 	    if(Flagfdepth[q]==1) break;
 	    ftracer[q]=tracerBuffer[q];
 	    tmid=rtb+(dt*=0.5);
-	    if(CHistParams.Random==1 && q>=NumGridTracers){
+	    if(CHistParams.Random==1){
 	      FlagRK4[q]=Heun(t, tmid, &ftracer[q], GetVflowplusVsink, &stateMT);
 	    } else {
 	      FlagRK4[q]=RK4(t, tmid, &ftracer[q], GetVflowplusVsink);
@@ -324,7 +322,7 @@ int main(int argc, char **argv){
 	      Flagfdepth[q]=1;
 	    }
 	  }
-	}    
+	}
 	if(Flagfdepth[q]==1) break;
       }
     }
@@ -338,51 +336,61 @@ int main(int argc, char **argv){
 #endif
 
 
-  vector<int> density(NumGridTracers,0);
-  vector<double> densityGaussian(NumGridTracers,0.0);
-  vector<int> densitySquare(NumGridTracers,0);
-  unsigned int l;
+  vector<int> numpoints(NumGrid,0);
+  vector<double> density(NumGrid,0);
+  int l;
   
-  omp_set_num_threads(20);
-  #pragma omp parallel for default(shared) private(l)// Parallelizing the code for computing trajectories
+omp_set_num_threads(20);
+#pragma omp parallel for default(shared) private(l)// Parallelizing the code for computing trajectories
     
-  for (unsigned int q=0; q<NumGridTracers; q++) {
+  for (int q=0; q<(int)NumTracers; q++) {
     
     if(FlagRK4[q]==1 || Flagfdepth[q]==0) continue;
     
-    vectorXYZ delta;
-    
+    vectorXYZ delta;    
     delta.x=CHistParams.Radius/(rearth*cos(ftracer[q].y*rads));
     delta.y=CHistParams.Radius/rearth;
     delta.z=0.0;
-    
-    vectorXYZ max,min;
-    
+
+    vectorXYZ min,max;
+
     max=ftracer[q]+(degrees*delta);
     min=ftracer[q]-(degrees*delta);
-      
-    for(l=NumGridTracers; l<NumTracers; l++) {
-      if(FlagRK4[l]==0 &&
-	 Flagfdepth[l]==1 &&
-	 ftracer[l].x<=max.x &&
-	 ftracer[l].y<=max.y &&
-	 ftracer[l].x>=min.x &&
-	 ftracer[l].y>=min.y){
-	densitySquare[q]++;
+    
+    int imin,imax,jmin,jmax;
+
+    imin=((min.x-CHistParams.DomainBL.x)/CHistParams.InterSpacing.x)-5;
+    if(imin<0) imin=0;
+    if(imin>=GridDimx) continue;
+
+    imax=((max.x-CHistParams.DomainBL.x)/CHistParams.InterSpacing.x)+5;
+    if(imax>=GridDimx) imax=GridDimx-1;
+    if(imax<0) continue;
+    
+    jmin=((min.y-CHistParams.DomainBL.y)/CHistParams.InterSpacing.y)-5;
+    if(jmin<0) jmin=0;
+    if(jmin>=GridDimy) continue;
+    
+    jmax=((max.y-CHistParams.DomainBL.y)/CHistParams.InterSpacing.y)+5;
+    if(jmax>=GridDimy) jmax=GridDimy-1;
+    if(jmax<0) continue;
+    
+    for(int j=jmin; j<jmax; j++){
+      for(int i=imin; i<imax; i++){
+	l=i+j*GridDimx;
 	vectorXYZ alpha;
 	
-	alpha.x=cos(ftracer[q].y*rads)*rads;
+	alpha.x=cos(Grid[l].y*rads)*rads;
 	alpha.y=rads;
 	alpha.z=0.0;
 	
 	vectorXYZ beta;
 	
-	beta=ftracer[q]-ftracer[l];
+	beta=ftracer[q]-Grid[l];
 	beta*=alpha;
 	double norm2beta=scalar(beta,beta);
 	if(rearth*sqrt(norm2beta)<=CHistParams.Radius){
-	  density[q]++;
-	  densityGaussian[q]+=(1.0/exp((rearth*rearth*norm2beta)/((CHistParams.Radius/2.0)*(CHistParams.Radius/2.0))));
+	  numpoints[l]++;
 	}
       }
     }
@@ -395,25 +403,25 @@ int main(int argc, char **argv){
 #endif
 
   int land;
-  vector<double> LR(NumGridTracers,0);
+  vector<double> LR(NumGrid,0);
   vectorXYZ testpoint;
   unsigned long s=123456789;
   init_genrand(s);
-  for (unsigned int q=0; q<NumGridTracers; q++) {
+  for (unsigned int q=0; q<NumGrid; q++) {
     vectorXYZ delta;
     
-    delta.x=CHistParams.Radius/(rearth*cos(ftracer[q].y*rads));
+    delta.x=CHistParams.Radius/(rearth*cos(Grid[q].y*rads));
     delta.y=CHistParams.Radius/rearth;
     delta.z=0.0;
     
     vectorXYZ max,min;
     
-    max=ftracer[q]+(degrees*delta);
-    min=ftracer[q]-(degrees*delta);
+    max=Grid[q]+(degrees*delta);
+    min=Grid[q]-(degrees*delta);
     
     vectorXYZ alpha;
 	
-    alpha.x=cos(ftracer[q].y*rads)*rads;
+    alpha.x=cos(Grid[q].y*rads)*rads;
     alpha.y=rads;
     alpha.z=0.0;
     land=0;
@@ -425,7 +433,7 @@ int main(int argc, char **argv){
     	
       vectorXYZ beta;
     
-      beta=ftracer[q]-testpoint;
+      beta=Grid[q]-testpoint;
       beta*=alpha;
       double norm2beta=scalar(beta,beta);
       if(rearth*sqrt(norm2beta)<=CHistParams.Radius){
@@ -438,6 +446,7 @@ int main(int argc, char **argv){
 
   /* Free Velocities*/
   FreeMemoryVelocities(tau+4);
+
   /**********************************************
    * WRITE RESULTS
    **********************************************/
@@ -454,59 +463,43 @@ int main(int argc, char **argv){
   // Position FILE
   string posfilename=rawfilename+".pos";  
   ofstream posfile(posfilename.c_str());
-  for(unsigned int q=0; q<NumGridTracers; q++){
-    posfile<<itracer[q]<<" ";
-    posfile<<ftracer[q]<<" ";
-    posfile<<Flagfdepth[q]<<" ";
-    posfile<<FlagRK4[q]<<" ";
+  for(unsigned int q=0; q<NumGrid; q++){
+    density[q]=numpoints[q]/CHistParams.Nparticles;
+    posfile<<Grid[q]<<" ";
     posfile<<LR[q]<<" ";
-    posfile<<density[q]/CHistParams.Nparticles<<" ";
+    posfile<<numpoints[q]<<" ";
     posfile<<density[q]<<endl;    
   }
   posfile.close();
 
-  // FINAL GRID
+  // REGULAR GRID Histogram
   string VTKffilename=rawfilename+".vtk";  
   ofstream offile(VTKffilename.c_str());
   
   offile<<"# vtk DataFile Version 3.0"<<endl;
-  offile<<"downward grid numerical density"<<endl; 
+  offile<<"Regular grid histogram"<<endl; 
   offile<<"ASCII"<<endl;
-  offile<<"DATASET POLYDATA"<<endl;
-  offile<<"POINTS "<<NumGridTracers<<" float"<<endl;
-  for(unsigned int q=0; q<NumGridTracers; q++){
-    offile<<ftracer[q].x<<" "<<ftracer[q].y<<" "<< fdepth <<endl;
-  }
-  offile<<"VERTICES "<<NumGridTracers<<" "<<NumGridTracers*2<<endl;
-  for(unsigned int q=0; q<NumGridTracers; q++){
-    offile<<"1 "<<q<<endl;
-  }
-  offile<<"POINT_DATA "<<NumGridTracers<<endl;
-  
-  offile<<"SCALARS density int 1"<<endl;
+  offile<<"DATASET STRUCTURED_POINTS"<<endl;
+  offile<<"DIMENSIONS "<<GridDimx<<" "<<GridDimy<<" 1"<<endl;
+  offile<<"ORIGIN "<<CHistParams.DomainBL.x<<" "<<CHistParams.DomainBL.y<<" "<<CHistParams.DomainBL.z<<endl;
+  offile<<"SPACINGS "<<CHistParams.InterSpacing.x<<" "<<CHistParams.InterSpacing.y<<" "<<CHistParams.InterSpacing.z <<endl;
+
+  offile<<"POINT_DATA "<<NumGrid<<endl; 
+  offile<<"SCALARS FactorDensity float 1"<<endl;
   offile<<"LOOKUP_TABLE default"<<endl;
   for(unsigned int q=0; q<density.size(); q++) {
       offile<<density[q]<<endl;
   }  
-
-  offile<<"SCALARS LR float 1"<<endl;
+  offile<<"SCALARS NumericalDensity float 1"<<endl;
+  offile<<"LOOKUP_TABLE default"<<endl;
+  for(unsigned int q=0; q<numpoints.size(); q++) {
+      offile<<numpoints[q]<<endl;
+  }  
+  offile<<"SCALARS LandRatio float 1"<<endl;
   offile<<"LOOKUP_TABLE default"<<endl;
   for(unsigned int q=0; q<LR.size(); q++) {
       offile<<LR[q]<<endl;
-  }  
-
-  offile<<"SCALARS densityGaussian float 1"<<endl;
-  offile<<"LOOKUP_TABLE default"<<endl;
-  for(unsigned int q=0; q<densityGaussian.size(); q++) {
-      offile<<densityGaussian[q]<<endl;
-  }  
-
-  offile<<"SCALARS densitySquare int 1"<<endl;
-  offile<<"LOOKUP_TABLE default"<<endl;
-  for(unsigned int q=0; q<densitySquare.size(); q++) {
-      offile<<densitySquare[q]<<endl;
-  }  
-
+  }
 
   return 0;
 
